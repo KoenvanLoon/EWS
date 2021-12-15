@@ -8,7 +8,7 @@ Short user manual
 =================
 
 Installation
-=================
+-----------------
 
 See https://github.com/computationalgeography/pycatch/blob/master/readme.txt
 
@@ -16,14 +16,14 @@ See https://github.com/computationalgeography/pycatch/blob/master/readme.txt
 
 
 Configuring the models
-===================
+-----------------
 
 Settings for the modified pycatch models are in EWS_main_configuration.py
 
 In EWS_StateVariables.py one can specify parameters/variables (such as window size) for the state variables. Note that this is linked to the configuration.
 
 Running the models
-===================
+-----------------
 
 Two models are present:
 - To run the model with 1 hour timesteps, run EWS_pycatch_hourly.py
@@ -31,7 +31,7 @@ Two models are present:
 
 
 Calculate EWS
-===================
+-----------------
 
 To calculate the EWS, run either EWS_weekly.py or EWS_hourly.py for the respective model. 
 
@@ -42,5 +42,5 @@ To calculate the EWS, run either EWS_weekly.py or EWS_hourly.py for the respecti
   See these files for more information on the methods present.
  
 Plotting
-===================
+-----------------
 To plot the results, run EWS_weekly_plots.py or EWS_hourly_plots.py respectively. User input is needed for this step.
