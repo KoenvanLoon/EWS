@@ -2,7 +2,7 @@
 
 Copyright Koen van Loon & Tijmen Janssen
 
-Early Warning Signal (EWS) calculations for modified pycatch models (originals can be found here:  https://github.com/computationalgeography/pycatch )
+Early Warning Signal (EWS) calculations for modified pycatch models (original models can be found here:  https://github.com/computationalgeography/pycatch )
 
 Short user manual
 =================
