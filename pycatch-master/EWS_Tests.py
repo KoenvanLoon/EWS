@@ -2,7 +2,7 @@
 EWS - Early Warning Signals
 EWS Tests
 
-@authors: KoenvanLoon & TijmenJanssen
+@authors: KoenvanLoon
 """
 
 import numpy as np
@@ -10,11 +10,22 @@ import os
 import scipy.stats
 import matplotlib.pyplot as plt
 from scipy import ndimage, signal
-import time as timeit
 
 import EWSPy as ews
 import EWS_configuration as cfg
 import EWS_StateVariables as ews_sv
+
+tau_treshold = 0.  # heuristic, exploratory
+
+
+# Helper function for consistent style for plots
+def apply_ews_plot_style(ax, grid=False):
+    if grid:
+        ax.grid(which='major', linestyle='--', alpha=0.5)
+        ax.grid(which='minor', linestyle=':', alpha=0.25)
+    ax.minorticks_on()
+    ax.tick_params(direction='out', which='both', length=4, width=1)
+    ax.spines['top'].set_visible(False) # Cleans top spine for less clutter
 
 # State variables for EWS
 """
@@ -35,6 +46,7 @@ names = []
 for variable in variables:
     names.append([f'{variable.full_name} as {variable.name}'])
 
+
 # Early warning signals names
 """
 Early warning signals (both temporal and spatial) which are included in EWSPy.py
@@ -53,9 +65,58 @@ ews_temporal_signals = {'mn': "mean", 'std': "standard deviation", 'var': "varia
                         'dfa': "detrended fluctuation analysis", 'acr': "autocorrelation", 'AR1': "AR1",
                         'rr': "return rate", 'coh': "conditional heteroskedasticity", 'timeseries': "timeseries",
                         'gauss': "gauss"}
-ews_spatial_signals = {'std': "standard deviation", 'var': "variance", 'skw': "skewness", 'krt': "kurtosis",
-                       'mI': "Moran's I"}
+ews_spatial_signals = {'mn': "mean", 'std': "standard deviation", 'var': "variance", 'skw': "skewness", 'krt': "kurtosis",
+                       'mI': "Moran's I", 'dft': "discrete Fourier transform", 'ps': "power spectrum"}
+ews_function_map = {'mn': 'mean', 'std': 'std', 'var': 'var', 'cv': 'cv', 'skw': 'skw', 'krt': 'krt', 'dfa': 'dfa',
+                    'acr': 'autocorrelation', 'AR1': 'AR1', 'mI': 'mI', 'dft': 'dft', 'ps': 'ps', 'rr': 'returnrate',
+                    'coh': 'cond_het', 'timeseries': 'timeseries', 'gauss': 'gauss'}
 
+
+def get_temporal_ews_function(sum_stat):
+    if sum_stat not in ews_function_map:
+        raise ValueError(f"Unknown EWS shorthand '{sum_stat}")
+
+    func_name = f"temporal_{ews_function_map[sum_stat]}"
+    if not hasattr(ews, func_name):
+        raise AttributeError(f"EWSPy has no function '{func_name}'")
+
+    return getattr(ews, func_name)
+
+
+# Which EWS support Kendall tau trend analysis
+ews_supports_tau = {
+    'mn': True,
+    'std': True,
+    'var': True,
+    'cv': True,
+    'skw': True,
+    'krt': True,
+    'dfa': True,    # after extraction
+    'AR1': True,
+    'mI': True,
+    'dft': True,
+    'ps': True,
+
+    # temporal but not trend-testable
+    'acr': False,
+    'rr': False,
+    'coh': False,
+    'timeseries': False,
+    'gauss': False,
+}
+
+
+
+def extract_ews_data(X, ews_short_name):
+    X = np.asarray(X)
+    assert X.ndim <= 2, (f"EWS '{ews_short_name}' returned unexpected array shape {X.shape}")
+    if ews_short_name == 'coh':
+        if X.ndim == 2:
+            return X[0, :]
+    if ews_short_name == 'dfa':
+        if X.ndim == 2:
+            return X[-1, :]
+    return X
 
 # Kendall tau stats
 """
@@ -68,7 +129,7 @@ state_variable : The state variable of interest.
 
 sum_stat : str, the summary statistic for which the Kendall tau value is calculated.
  
-comp2 : str, either 'Same' or 'Forcing', sets the comparison to the mean of the same state variable or the forcing 
+comp2 : str, either 'Same' or 'Forcing', sets the comparison to time (window index) same state variable or the forcing 
     (grazing) rate
 
 path : str, path where inputs from the hourly/weekly model are stored.
@@ -84,6 +145,11 @@ p : float, the p-value (significance) of the calculated Kendall tau value.
 
 
 def kendalltau_stats(state_variable, sum_stat, comp2='Same', path='./1/'):
+    if not ews_supports_tau.get(sum_stat, False):
+        print(f"[INFO] Kendall tau not defined for EWS '{sum_stat}'.")
+        return np.NaN, np.NaN
+
+    dim = None
     if state_variable.temporal:
         dim = '.t.'
     elif state_variable.spatial:
@@ -93,13 +159,28 @@ def kendalltau_stats(state_variable, sum_stat, comp2='Same', path='./1/'):
     fdict = os.path.join(path + state_variable.name + dim)
     if os.path.exists(fdict + sum_stat + '.numpy.txt'):
         X = np.loadtxt(fdict + sum_stat + '.numpy.txt')
+        X = extract_ews_data(X, sum_stat)
 
-        if comp2 == 'Same':  # Dakos et al, 2008
-            Y = np.loadtxt(fdict + 'mn.numpy.txt')
+        Y = None
+        if comp2 == 'Same': # Dakos et al., 2008
+            Y = np.arange(len(X))
+
         elif comp2 == 'Forcing':  # Dakos et al, 2011 - Does not work if window sizes are different for the forcing & SV
             Y = np.loadtxt('./1/gA.t.mn.numpy.txt')
 
         tau, p = scipy.stats.kendalltau(X, Y, nan_policy='propagate')
+
+        if np.isnan(tau):
+            tau_omit, p_omit = scipy.stats.kendalltau(X, Y, nan_policy='omit')
+            n_valid = np.sum(np.isfinite(X) & np.isfinite(Y))
+
+            coverage = n_valid / len(X)
+
+            print(
+                f"[INFO] Kendall τ undefined with propagate for {sum_stat};\n"
+                f"({n_valid}/{len(X)} valid points - coverage: {coverage:.1%}).\n"
+                f"τ_omit = {tau_omit:.3f}, p_omit = {p_omit:.3g}\n"
+            )
 
     return tau, p
 
@@ -118,7 +199,7 @@ sum_stat : str, the summary statistic for which the Kendall tau value is calcula
 method : str, either 'm1g', 'm2g', or 'm3g', the dummy data generation method for which the Kendall tau value is 
     calculated.
  
-comp2 : str, either 'Same' or 'Forcing', sets the comparison to the mean of the same state variable or the forcing 
+comp2 : str, either 'Same' or 'Forcing', sets the comparison to the time (window index) of the same state variable or the forcing 
     (grazing) rate
 
 path : str, path where inputs from the hourly/weekly model are stored.
@@ -134,6 +215,10 @@ p : array, the p-value (significance) of the calculated Kendall tau values for e
 
 
 def kendalltau_stats_dummy(state_variable, sum_stat, method='m1g', comp2='Same', path='./1/'):
+    if not ews_supports_tau.get(sum_stat, False):
+        return [np.NaN] * cfg.nr_generated_datasets, [np.NaN] * cfg.nr_generated_datasets
+
+    dim = None
     if state_variable.temporal:
         dim = '.t.'
     elif state_variable.spatial:
@@ -144,13 +229,23 @@ def kendalltau_stats_dummy(state_variable, sum_stat, method='m1g', comp2='Same',
     taurray = [np.NaN] * cfg.nr_generated_datasets
     parray = [np.NaN] * cfg.nr_generated_datasets
     for realization in range(cfg.nr_generated_datasets):
-        fdict = os.path.join(path + method + str(realization).zfill(generated_number_length) + '/'
-                             + state_variable.name + dim)
-        if os.path.exists(fdict + sum_stat + '.numpy.txt'):
-            X = np.loadtxt(fdict + sum_stat + '.numpy.txt')
+        base = os.path.join( path, f"{method}{str(realization).zfill(generated_number_length)}")
 
-            if comp2 == 'Same':  # Dakos et al, 2008
-                Y = np.loadtxt(fdict + 'mn.numpy.txt')
+        fdict = os.path.join(base, f"{state_variable.name}{dim}")
+        fname = fdict + sum_stat + ".numpy.txt"
+
+        if realization == 0:
+            print("Example surrogate path being checked:")
+            print(fname)
+
+        if os.path.exists(fname):
+            X = np.loadtxt(fname)
+            X = extract_ews_data(X, sum_stat)
+
+            Y = None
+            if comp2 == 'Same': # Dakos et al., 2008
+                Y = np.arange(len(X))
+
             elif comp2 == 'Forcing':  # Dakos et al, 2011 - Does not work if window sizes are different for the forcing & SV, detrending == Gaus
                 Y = np.loadtxt('./1/gA.t.mn.numpy.txt')
 
@@ -159,163 +254,244 @@ def kendalltau_stats_dummy(state_variable, sum_stat, method='m1g', comp2='Same',
     return taurray, parray
 
 
-# Histogram plot maker
+# Real system trend
 """
-Returns a histogram plot of the Kendall tau value(s) of the modelled dataset and dummy datasets.
+Plots the EWS indicator for the real system and quantifies its trend.
+This function visualizes the EWS summary statistic over time (window index) and annotates the Kendall tau trend
+    statistic and p-value.
 
 Args:
 ----
 
-variable : The state variable of interest.
+state_variable : The state variable of interest.
 
-statistic : str, the summary statistic for which the Kendall tau value is calculated.
- 
-method : str, either 'm1g', 'm2g', or 'm3g', the dummy data generation method for which the Kendall tau value is 
-    calculated.
-    
-tau_values : array, the Kendall tau values (rank correlation coefficient) for each realization of dummy data.
+sum_stat : str, the summary statistic for which the Kendall tau value is calculated.
 
-tau_original : float, the Kendall tau value for the modelled dataset.
-
-chance_cor : float, the p-value of the Kendall tau value for the modelled dataset.
+comp2 : str, either 'Same' or 'Forcing', sets the comparison to time (window index) same state variable or the forcing 
+    (grazing) rate
 
 path : str, path where inputs from the hourly/weekly model are stored.
 
 Returns:
 ----
 
-A histogram plot of the Kendall tau value(s) of the modelled dataset and dummy datasets. Optionally saved to disk.
-
+Line plot with Kendall tau and p-value annotation.
 """
 
 
-def histogram_plot(variable, statistic, method, tau_values, tau_original=np.NaN, chance_cor=np.NaN, path='./1/'):
-    bins = np.linspace(-1, 1, num=41)
-    histogram = np.histogram(tau_values, bins)
-    print("Histogram values ([values],[bins]):", histogram)
+def plot_real_trend(state_variable, sum_stat, comp2='Same', path='./1/'):
+    dim = '.t.' if state_variable.temporal else '.s.'
+    fname = os.path.join(path, state_variable.name + dim + sum_stat + '.numpy.txt')
 
-    plt.tight_layout()
-    plt.hist(tau_values, bins, ec='black')
-    if tau_original != np.NaN:
-        plt.axvline(x=tau_original, color='r')
-        if variable.temporal:
-            plt.title(f"Probability distribution of the trend statistic ({ews_temporal_signals[statistic]}) under {method} of {variable.full_name}")
-        elif variable.spatial:
-            plt.title(f"Probability distribution of the trend statistic ({ews_spatial_signals[statistic]}) under {method} for  of {variable.full_name}")
-        plt.xlabel("K \u03C4")
-        plt.ylabel("Frequency")
-        plt.text(0.7, 0, f" \u03C4 = {round(tau_original, 3)} \n p = {round(chance_cor, 3)} \n")
+    if not os.path.exists(fname):
+        raise FileNotFoundError(fname)
 
-    print("Save the plot as a .pdf? [Y/n]")
+    X = np.loadtxt(fname)
+    X = extract_ews_data(X, sum_stat)
+    t = np.arange(len(X))
+
+    tau, p = kendalltau_stats(
+        state_variable=state_variable,
+        sum_stat=sum_stat,
+        comp2=comp2,
+        path=path
+    )
+
+    fig, ax = plt.subplots()
+    ax.plot(t, X, lw=cfg.EWS_linewidth, color=cfg.EWS_colour_cycle[0])
+    apply_ews_plot_style(ax, grid=True)
+    ax.text(0.7, 0.95, f"Kendall τ = {tau:.3f}\np = {p:.3g}", transform=ax.transAxes, va='top',
+            bbox=dict(facecolor='white', alpha=0.85, edgecolor='none'))
+
+    print("Save the plot as a .pdf and .svg? [Y/n]")
     save_plot = input()
     if save_plot == 'Y' or save_plot == 'y':
-        plt.savefig(path + f"{variable.name}_{statistic}_{method}_histogram.pdf", format="pdf")
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+        for fmt in ["svg", "pdf"]:
+            plt.savefig(path + f"plot_real_trend_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
 
     plt.show()
-    plt.close()
 
 
-# Chance value
+# Null model
 """
-The chance of the Kendall tau value exceeding the value found in the dummy datasets.
+Compares the observed Kendall tau trend to a null-model distribution.
+
+Plots a histogram of Kendall tau values obtained from surrogate (null) datasets and overlays the observed tau from the
+real system.
 
 Args:
 ----
 
-values : array, Kendall tau values of dummy datasets.
+state_variable : The state variable of interest.
 
-value : float, Kendall tau value of modelled dataset.
+sum_stat : str, the summary statistic for which the Kendall tau value is calculated.
 
-sign_ini : str, 'None' by default. Whether the value should be greater ('<') or smaller ('>') than values.
-
-"""
-
-
-def chance_value(values, value, sign_ini='None'):
-    sign = sign_ini
-    if sign == 'None':
-        if value > 0.:
-            sign = '>'
-        elif value < 0.:
-            sign = '<'
-        else:
-            print(f"Tau value of {value} encountered while sign is not specified. Defaulted to 'tau values' > 'tau value'.")
-            sign = '>'
-
-    if sign == '>':
-        p = np.nansum(np.array(values) > value) / len(values)
-    elif sign == '<':
-        p = np.nansum(np.array(values) < value) / len(values)
-    else:
-        print(f"{sign} is not supported")
-
-    return p
-
-
-# Histogram plot maker user input
-"""
-Returns a histogram plot of the Kendall tau value(s) of the modelled dataset and dummy datasets by running the
-    histogram_plot() function.
-
-Args:
-----
+comp2 : str, either 'Same' or 'Forcing', sets the comparison to time (window index) same state variable or the forcing 
+    (grazing) rate
 
 path : str, path where inputs from the hourly/weekly model are stored.
+
+method : str, either 'm1g', 'm2g', or 'm3g', the dummy data generation method for which the Kendall tau value is 
+    calculated.
 
 Returns:
 ----
 
-optionally : A histogram plot of the Kendall tau value(s) of the modelled dataset and dummy datasets. Optionally saved 
-    to disk.
-    
-optionally : Kendall tau and p-values otherwise shown in the histogram plot.
-
+Line plot with Kendall tau and p-value annotation.
 """
 
 
-def kendall_tau_valhist(path='./1/'):
-    print("Variables present in the current run are:")
-    for name in names:
-        print(name)
+def plot_null_model(state_variable, sum_stat, comp2='Same', path='./1/', method='m1g'):
+    if not ews_supports_tau.get(sum_stat, False):
+        raise ValueError(f"Null-model tests are not meaningful for EWS '{sum_stat}'.")
 
-    print("Enter the short name for the state variable:")
-    state_variable_input = input()
-    state_variable = [variable for variable in variables if variable.name == state_variable_input][0]
+    tau_obs, _ = kendalltau_stats(
+        state_variable=state_variable,
+        sum_stat=sum_stat,
+        comp2=comp2,
+        path=path
+    )
 
-    if state_variable.temporal:
-        print("EW signals present are:", ews_temporal_signals)
-    elif state_variable.spatial:
-        print("EW signals present are:", ews_spatial_signals)
+    tau_null, _ = kendalltau_stats_dummy(
+        state_variable=state_variable,
+        sum_stat=sum_stat,
+        method=method,
+        comp2=comp2,
+        path=path
+    )
 
-    print("Enter the short name for the EW signal:")
-    summary_statistic = input()
-    tau_m, p_m = kendalltau_stats(state_variable=state_variable, sum_stat=summary_statistic)
+    tau_null = np.array(tau_null, dtype=float)
 
-    print("Do you want to make a histogram comparison graph? [Y/n]")
-    histogram = input()
-    if histogram == 'Y' or histogram == 'y':
-        print("For which null model do you want to test? [m1g, m2g, m3g]")
-        method = input()
-        tau_values, p_values = kendalltau_stats_dummy(state_variable=state_variable, sum_stat=summary_statistic, method=method)
-        chance_cor = chance_value(tau_values, tau_m)
+    # Remove invalid surrogate realizations (Dakos et al. convention - trust me, it was necessary)
+    tau_null_valid = tau_null[np.isfinite(tau_null)]
 
-        histogram_plot(variable=state_variable, statistic=summary_statistic, method=method, tau_values=tau_values, tau_original=tau_m, chance_cor=chance_cor, path=path)
+    print(f"Valid surrogates: {tau_null_valid.size} / {tau_null.size}")
+
+    if tau_null_valid.size == 0:
+        raise ValueError(
+            f"No valid Kendall τ values found for null model '{method}'. "
+            "Check surrogate generation or EWS output files."
+        )
+
+    fig, ax = plt.subplots()
+
+    # Freedman-Diaconis histogram binning (robust to skewed null distributions)
+    N = tau_null_valid.size
+    q25, q75 = np.percentile(tau_null_valid, [25, 75])
+    iqr = q75 - q25
+
+    if iqr > 0:
+        bin_width = 2 * iqr * N ** (-1/3)
+        bins = int(np.ceil((tau_null_valid.max() - tau_null_valid.min()) / bin_width))
     else:
-        print("Print Kendall tau and p values? [Y/n]")
-        print_on = input()
-        if print_on == 'Y' or print_on == 'y':
-            print(tau_m, p_m)
+        bins = int(np.sqrt(N))  # fallback. Yes, this is also a valid method - but FD is the better flex.
 
-    print("Would you like to make another plot? [Y/n]")
-    answer = input()
-    if answer == 'Y' or answer == 'y':
-        kendall_tau_valhist(path=path)
-    else:
-        print("Terminated histogram maker. Goodbye.")
+    ax.hist(tau_null_valid, bins=bins, edgecolor='black', color=cfg.EWS_colour_cycle[1], alpha=0.85)
+
+    ax.axvline(tau_obs, color=cfg.EWS_colour_cycle[3], lw=cfg.EWS_linewidth, label=r'$\tau_{\mathrm{obs}}$')
+
+    q95 = np.nanpercentile(tau_null_valid, 95)
+    ax.axvline(q95, color='k', ls='--', lw=1.5, label=r'$\tau_{0.95}$')
+
+    ax.set_xlabel(r'Kendall rank correlation ($\tau$)')
+    ax.set_ylabel("Frequency")
+    ax.set_title(f"Null-model test ({method})\n" f"{state_variable.full_name} – {ews_temporal_signals.get(sum_stat, sum_stat)}")
+
+    ax.legend(loc='upper right')
+    apply_ews_plot_style(ax, grid=True)
+
+    print("Save the plot as a .pdf and .svg? [Y/n]")
+    save_plot = input()
+    if save_plot == 'Y' or save_plot == 'y':
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+        for fmt in ["svg", "pdf"]:
+            plt.savefig(path + f"plot_null_model_{method}_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
+
+    plt.show()
 
 
-# TODO - Variables sorted as in weekly_plots, move other things to cfg
-# TODO - Change method names
+# Sensitivity
+"""
+Sensitivity analysis of EWS trends across parameter combinations. Computes Kendall tau between an EWS indicator and time
+    for each parameter combination and visualizes the result as a heatmap.
+    
+Args:
+-----
+
+timeseries : A 2D numpy array containing data points of a early-warning signal.
+
+ews_function : -
+
+x_values : array, x coords.
+
+y_values : array, y coords.
+
+window_overlap : The number (int) of data points in the window equal to the last data points of the previous time 
+    window.
+    
+detrend : str, optional, method of detrending used.
+
+xlabel : str, title given to the x-axis.
+
+ylabel : str, title given to the y-axis.
+
+title : str, title given to the heatmap.
+
+Returns:
+
+Plotted heatmap with p-contours.
+"""
+
+
+def plot_sensitivity(timeseries, ews_function, x_values, y_values, window_overlap=0, detrend=None, xlabel='Parameter x',
+                     ylabel='Window size', title='Sensitivity analysis', path='./1/'):
+    tau_arr = np.zeros((len(y_values), len(x_values)))
+    p_arr = np.zeros_like(tau_arr)
+
+    for j, x in enumerate(x_values):
+        ts = timeseries.copy()
+
+        if detrend == 'gaussian':
+            ts = ts - ndimage.gaussian_filter1d(ts, x)
+
+        for i, window_size in enumerate(y_values):
+            windows = window(ts, window_size, window_overlap)
+            stat = ews_function(windows)
+            t = np.arange(len(stat))
+
+            tau, p = scipy.stats.kendalltau(stat, t)
+            tau_arr[i, j] = tau
+            p_arr[i, j] = p
+
+    X, Y = np.meshgrid(x_values, y_values)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    cs = ax.contourf(X, Y, tau_arr, levels=20, cmap='coolwarm')
+    fig.colorbar(cs, ax=ax, label="Kendall τ")
+    ax.contour(X, Y, p_arr, levels=[0.05], colors='k', linewidths=1)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+
+    apply_ews_plot_style(ax, grid=False)
+
+    print("Save the plot as a .pdf and .svg? [Y/n]")
+    save_plot = input()
+    if save_plot == 'Y' or save_plot == 'y':
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+        for fmt in ["svg", "pdf"]:
+            plt.savefig(path + f"plot_sensitivity_{ews_function}.{fmt}", format=fmt, dpi=300)
+
+    plt.show()
+
+
+# Window size bounds as fractions of time series length
+def get_window_bounds(ts_length, min_fraction=0.000096, max_fraction=0.5):
+    w_min = int(np.ceil(min_fraction * ts_length))
+    w_max = int(np.floor(max_fraction * ts_length))
+    return max(w_min, 10), max(w_min + 1, w_max)
 
 
 # Time series to time windows
@@ -349,22 +525,26 @@ def window(timeseries, window_size, window_overlap):
     sh = (timeseries.size - window_size + 1, window_size)
     st = timeseries.strides * 2
     if window_overlap != 0:
-        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::actual_window_overlap]
+        return np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::actual_window_overlap]
     elif window_overlap == 0:
-        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::window_size]
-    return view
+        return np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::window_size]
 
 
 # Windowsize tests
 """
-Makes a contourplot with Kendall tau and p-values for different window sizes and overlaps.
+Kendall tau is computed between the EWS indicator and time (window index), testing the robustness of trend detection 
+against different window sizes and overlaps.
 
 Args:
 ----
 
+state_variable : The state variable of interest.
+
+sum_stat : str, the summary statistic for which the windowsize is tested.
+
 path : str, path where inputs from the hourly/weekly model are stored.
 
-method : str, either 'None' or 'Linear'. If 'Linear', a linear detrending is performed for each window.
+method : str, either 'None' or 'MeanLinear'. If 'MeanLinear', a linear detrending is performed for each window.
 
 Returns:
 ----
@@ -374,103 +554,74 @@ Two contourplots with Kendall tau and p-values for different window sizes and ov
 """
 
 
-def test_windowsize(path='./1/', method='None'):
+def test_windowsize(state_variable, sum_stat, path='./1/', method='None'):
+    if not state_variable.temporal:
+        raise ValueError("Window-size tests are only defined for temporal variables.")
+
     # Loading files
-    fname = ews.file_name_str('bioA', cfg.number_of_timesteps_weekly)
+    fname = ews.file_name_str(state_variable.name, cfg.number_of_timesteps_weekly)
     fpath = os.path.join(path + fname)
-    biomass_timeseries = np.loadtxt(fpath + '.numpy.txt')
+    ts = np.loadtxt(fpath + '.numpy.txt')
+
     if cfg.cutoff:
-        biomass_timeseries = biomass_timeseries[:cfg.cutoff_point]
+        ts = ts[:cfg.cutoff_point]
 
-    # Window sizes & overlap
-
-    # # Normal
-    # window_overlaps = np.arange(0, 1000, 10)
-    # if cfg.cutoff:
-    #     window_sizes = np.arange(1000, cfg.cutoff_point // 2 + 1, 10)
-    # else:
-    #     window_sizes = np.arange(1000, cfg.number_of_timesteps_weekly // 2 + 1, 10)
+    # Select EWS function dynamically
+    ews_func = get_temporal_ews_function(sum_stat)
 
     # Zoom
-    window_overlaps = np.arange(0, 50, 1)
-    if cfg.cutoff:
-        window_sizes = np.arange(52, 1560, 1)
-    else:
-        window_sizes = np.arange(52, 1560, 1)
+    ts_len = len(ts)
+    w_min, w_max = get_window_bounds(ts_len)
+
+    window_sizes = np.arange(w_min, w_max + 1, max(1, (w_max - w_min) // 50))
+    window_overlaps = np.arange(0, int(0.5 * w_min) + 1, max(1, w_min // 20))
 
     # X and Y coords
     x, y = np.meshgrid(window_overlaps, window_sizes)
 
     # Calculating and storing tau and p values
-    tau_arr = np.zeros((len(window_sizes), len(window_overlaps)))
-    p_arr = np.zeros((len(window_sizes), len(window_overlaps)))
+    tau_arr = np.zeros_like(x, dtype=float)
+    p_arr = np.zeros_like(x, dtype=float)
+
     for i, window_size in enumerate(window_sizes):
         print(f"Moved to windowsize {window_size}")
         for j, window_overlap in enumerate(window_overlaps):
-            stack_of_windows = window(biomass_timeseries, window_size, window_overlap)
 
-            if method == 'Linear':
-                stack_of_windows = signal.detrend(stack_of_windows)
+            if window_overlap >= window_size:
+                continue
 
-            mean = np.nanmean(stack_of_windows, axis=1)
-            stat = ews.temporal_autocorrelation(stack_of_windows)
+            windows = window(ts, window_size, window_overlap)
 
-            tau, p = scipy.stats.kendalltau(stat, mean, nan_policy='propagate')
-            # tau_arr[i, j] = tau
-            # p_arr[i, j] = p
+            if method == 'MeanLinear':
+                windows = signal.detrend(windows)
 
-            if np.abs(tau) >= 0.3:
-                tau_arr[i, j] = tau
-            else:
-                tau_arr[i, j] = np.nan
+            stat = extract_ews_data(ews_func(windows), sum_stat)
+            t = np.arange(len(stat))
 
-            if p <= 0.05:
-                p_arr[i, j] = p
-            else:
-                p_arr[i, j] = np.nan
+            tau_arr[i, j], p_arr[i, j] = scipy.stats.kendalltau(stat, t)
 
     # Making the plots
-    z_array = [tau_arr, p_arr]
-    fig, axs = plt.subplots(ncols=2)
-    for ax, z in zip(axs, z_array):
-        # Making the contour plot
-        if z.all() == tau_arr.all():
-            ax.set_title('Biomass autocorrelation windowtest \u03C4-value')
-            # # Max value(s)
-            # max_value = np.max(z)
-            # local_max_index = np.where(z == max_value)
-            # max_x, max_y = x[local_max_index[0], local_max_index[1]], y[local_max_index[0], local_max_index[1]]
-            # ax.plot(max_x, max_y, color='red', marker="v", zorder=10, markersize=10, clip_on=False)
-        elif z.all() == p_arr.all():
-            ax.set_title('Biomass autocorrelation windowtest p-value')
-        cs = ax.contourf(x, y, z, 10)
-        #ax.contour(cs, colors='k')
+    fig, axs = plt.subplots(1, 2, figsize=(12, 5), sharey='row')
+    titles = [r"Kendall $\tau$", r"$p$-value"]
 
-        # Creating z coord for plot
-        x_flat, y_flat, z_flat = x.flatten(), y.flatten(), z.flatten()
-        def fmt(x, y):
-            dist = np.linalg.norm(np.vstack([x_flat - x, y_flat - y]), axis=0)
-            index = np.argmin(dist)
-            z = z_flat[index]
-            return 'x={x:.5f}   y={y:.5f}   z={z:.5f}'.format(x=x, y=y, z=z)
-        fig.gca().format_coord = fmt
+    for ax, Z, title in zip(axs, [tau_arr, p_arr], titles):
+        cs = ax.contourf(x, y, Z, levels=20, cmap='coolwarm')
+        ax.contour(x, y, p_arr, levels=[0.05], colors='k')
+        ax.set_title(title)
+        ax.set_xlabel("Window overlap")
+        apply_ews_plot_style(ax, grid=False)
+        fig.colorbar(cs, ax=ax, fraction=0.046, pad=0.04)
 
-        # Labels, colorbar and grid
-        ax.set_ylabel('Window size')
-        ax.set_xlabel('Window overlap')
-        ax.grid(c='k', alpha=0.3)
-        fig.colorbar(cs, ax=ax)
+    axs[0].set_ylabel("window size")
+    fig.suptitle(f"{state_variable.full_name} - {ews_temporal_signals[sum_stat]}\n"
+                 "Window-size sensitivity", fontsize=12)
 
-        # # Min values
-        # min_value = np.min(z)
-        # local_min_index = np.where(z == min_value)
-        # min_x, min_y = x[local_min_index[0], local_min_index[1]], y[local_min_index[0], local_min_index[1]]
-        # ax.plot(min_x, min_y, color='blue', marker="v", zorder=10, markersize=10, clip_on=False)
-
-    print("Save the plot as a .pdf? [Y/n]")
+    print("Save the plot as a .pdf & svg? [Y/n]")
     save_plot = input()
     if save_plot == 'Y' or save_plot == 'y':
-        plt.savefig(path + f"{method}_windowsize_test_var.pdf", format="pdf")
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+        for fmt in ["svg", "pdf"]:
+            plt.savefig(path + f"windowsize_test_{method}_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
 
     plt.show()
 
@@ -481,120 +632,165 @@ Makes a contourplot with Kendall tau and p-values for different window sizes and
 
 Args:
 ----
+state_variable : temporal state variable to analyze.
+
+sum_stat : str, short name of the EWS.
 
 path : str, path where inputs from the hourly/weekly model are stored.
 
 Returns:
 ----
 
-Two contourplots with Kendall tau and p-values for different window sizes and Gaussian filter sizes. Optionally saved to 
-    disk.
+Two contourplots with Kendall tau and p-values for different window sizes and Gaussian filter sizes. Plot optionally
+    saved to disk.
 
 """
 
 
-def test_windowgauss(path='./1/'):
+def test_windowgauss(state_variable, sum_stat, path='./1/'):
+    if not state_variable.temporal:
+        raise ValueError("Window-Gaussian tests are only defined for temporal variables.")
+
     # Loading files
-    fname = ews.file_name_str('bioA', cfg.number_of_timesteps_weekly)
+    fname = ews.file_name_str(state_variable.name, cfg.number_of_timesteps_weekly)
     fpath = os.path.join(path + fname)
-    biomass_timeseries = np.loadtxt(fpath + '.numpy.txt')
+    ts = np.loadtxt(fpath + '.numpy.txt')
+
     if cfg.cutoff:
-        biomass_timeseries = biomass_timeseries[:cfg.cutoff_point]
+        ts = ts[:cfg.cutoff_point]
 
-    # Window sizes & overlap
-
-    # # Normal - Don't even try to run this, it takes ages
-    # gaussian_filter = np.arange(0, 1000, 10)
-    # if cfg.cutoff:
-    #     window_sizes = np.arange(1000, cfg.cutoff_point // 2 + 1, 10)
-    # else:
-    #     window_sizes = np.arange(1000, cfg.number_of_timesteps_weekly // 2 + 1, 10)
+    ews_func = get_temporal_ews_function(sum_stat)
 
     # Zoom
-    gaussian_filter = np.arange(0, 1000, 10)
-    if cfg.cutoff:
-        window_sizes = np.arange(100, 15000, 10)
-    else:
-        window_sizes = np.arange(100, 15000, 10)
+    ts_len = len(ts)
+    w_min, w_max = get_window_bounds(ts_len)
+
+    window_sizes = np.arange(w_min, w_max + 1, max(1, (w_max - w_min) // 50))
+    gaussian_sigmas = np.arange(0, int(0.25 * w_min) + 1, max(1, w_min // 20))
 
     # X and Y coords
-    x, y = np.meshgrid(gaussian_filter, window_sizes)
+    x, y = np.meshgrid(gaussian_sigmas, window_sizes)
 
     # Calculating and storing tau and p values
-    tau_arr = np.zeros((len(window_sizes), len(gaussian_filter)))
-    p_arr = np.zeros((len(window_sizes), len(gaussian_filter)))
+    tau_arr = np.zeros_like(x, dtype=float)
+    p_arr = np.zeros_like(x, dtype=float)
 
-    for j, gauss_filter in enumerate(gaussian_filter):
-        print(f"Moved to Gaussian filter-size {gauss_filter}")
-        filter = ndimage.gaussian_filter1d(biomass_timeseries, gauss_filter)
-        biomass_timeseries_detrended = biomass_timeseries - filter
-        for i, window_size in enumerate(window_sizes):
+    for j, sigma in enumerate(gaussian_sigmas):
+        print(f"Gaussian σ {sigma}/{gaussian_sigmas[-1]}")
 
-            stack_of_windows = window(biomass_timeseries_detrended, window_size, 0)
+        if sigma > 0:
+            ts_detr = ts - ndimage.gaussian_filter1d(ts, sigma)
+        else:
+            ts_detr = ts.copy()
 
-            mean = np.nanmean(stack_of_windows, axis=1)
-            stat = ews.temporal_var(stack_of_windows)
+        for i, w in enumerate(window_sizes):
+            windows = window(ts_detr, w, 0)
+            stat = extract_ews_data(ews_func(windows), sum_stat)
+            t = np.arange(len(stat))
 
-            tau, p = scipy.stats.kendalltau(stat, mean, nan_policy='propagate')
-            # tau_arr[i, j] = tau
-            # p_arr[i, j] = p
+            tau_arr[i, j], p_arr[i, j] = scipy.stats.kendalltau(stat, t)
 
-            if np.abs(tau) >= 0.2:
-                tau_arr[i, j] = tau
-            else:
-                tau_arr[i, j] = np.nan
+    # Plot
+    fig, axs = plt.subplots(1, 2, figsize=(12, 5), sharey='row')
+    titles = [r"Kendall $\tau$", r"$p$-value"]
 
-            if p <= 0.1:
-                p_arr[i, j] = p
-            else:
-                p_arr[i, j] = np.nan
+    for ax, Z, title in zip(axs, [tau_arr, p_arr], titles):
+        cs = ax.contourf(x, y, Z, levels=20, cmap='coolwarm')
+        ax.contour(x, y, p_arr, levels=[0.05], colors='k')
+        ax.set_title(title)
+        ax.set_xlabel("Gaussian filter width σ")
+        apply_ews_plot_style(ax, grid=False)
+        fig.colorbar(cs, ax=ax, fraction=0.046, pad=0.04)
 
-    # Making the plots
-    z_array = [tau_arr, p_arr]
-    fig, axs = plt.subplots(ncols=2)
-    for ax, z in zip(axs, z_array):
-        # Making the contour plot
-        if z.all() == tau_arr.all():
-            ax.set_title('Biomass variance window-gaussian-test \u03C4-value')
-            # # Max value(s)
-            # max_value = np.max(z)
-            # local_max_index = np.where(z == max_value)
-            # max_x, max_y = x[local_max_index[0], local_max_index[1]], y[local_max_index[0], local_max_index[1]]
-            # ax.plot(max_x, max_y, color='red', marker="v", zorder=10, markersize=10, clip_on=False)
-        elif z.all() == p_arr.all():
-            ax.set_title('Biomass variance window-gaussian-test p-value')
-        cs = ax.contourf(x, y, z, 10)
-        #ax.contour(cs, colors='k')
+    axs[0].set_ylabel("Window size")
+    fig.suptitle(f"{state_variable.full_name} – {ews_temporal_signals[sum_stat]}\n"
+                 "Window–Gaussian sensitivity (Dakos-style robustness test)", fontsize=12)
 
-        # Creating z coord for plot
-        x_flat, y_flat, z_flat = x.flatten(), y.flatten(), z.flatten()
-        def fmt(x, y):
-            dist = np.linalg.norm(np.vstack([x_flat - x, y_flat - y]), axis=0)
-            index = np.argmin(dist)
-            z = z_flat[index]
-            return 'x={x:.5f}   y={y:.5f}   z={z:.5f}'.format(x=x, y=y, z=z)
-        fig.gca().format_coord = fmt
-
-        # Labels, colorbar and grid
-        ax.set_ylabel('Window size')
-        ax.set_xlabel('Gaussian filter size')
-        ax.grid(c='k', alpha=0.3)
-        fig.colorbar(cs, ax=ax)
-
-        # # Min values
-        # min_value = np.min(z)
-        # local_min_index = np.where(z == min_value)
-        # min_x, min_y = x[local_min_index[0], local_min_index[1]], y[local_min_index[0], local_min_index[1]]
-        # ax.plot(min_x, min_y, color='blue', marker="v", zorder=10, markersize=10, clip_on=False)
-
-    print("Save the plot as a .pdf? [Y/n]")
+    print("Save the plot as a .pdf and .svg? [Y/n]")
     save_plot = input()
     if save_plot == 'Y' or save_plot == 'y':
-        plt.savefig(path + f"window_gauss_test_var.pdf", format="pdf")
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+        for fmt in ["svg", "pdf"]:
+            plt.savefig(path + f"window_gauss_test_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
 
     plt.show()
 
 
-#test_windowgauss(path='./1/')
-test_windowsize(path='./1/')
-#kendall_tau_valhist()
+# User input Tests-plot looper
+"""
+Loops the function for user inputs for plot maker.
+
+Args:
+----
+
+path : str, path where model/EWS_weekly/hourly.py outputs are stored.
+
+Runs the different plot functions in this file for given inputs
+
+"""
+
+
+def user_input_tests_looper(path='./1/'):
+    print("\nAvailable state variables:")
+    for variable in variables:
+        print(f" - {variable.name}: {variable.full_name}")
+
+    state_name = input("\nEnter state variable short name:")
+    try:
+        state_variable = next(v for v in variables if v.name == state_name)
+    except StopIteration:
+        print("Unknown state variable.")
+        return
+
+    if state_variable.temporal:
+        print("\nAvailable temporal EWS:", list(ews_temporal_signals.keys()))
+    else:
+        print("\nAvailable spatial EWS:", list(ews_spatial_signals.keys()))
+
+    sum_stat = input("enter EWS short name: ")
+
+    print("\nChoose analysis type:")
+    print(" 1 - Plot real-system trend")
+    print(" 2 - Null-model test")
+    print(" 3 - Window-size sensitivity test")
+    print(" 4 - Window–Gaussian sensitivity test")
+
+    choice = input("Enter choice (1–4): ")
+
+    if choice == '1':
+        plot_real_trend(
+            state_variable=state_variable,
+            sum_stat=sum_stat,
+            path=path
+        )
+
+    elif choice == '2':
+        print("Choose null model [m1g, m2g, m3g]:")
+        method = input()
+        plot_null_model(
+            state_variable=state_variable,
+            sum_stat=sum_stat,
+            method=method,
+            path=path
+        )
+
+    elif choice == '3':
+        test_windowsize(state_variable=state_variable, sum_stat=sum_stat, path=path)
+
+    elif choice == '4':
+        test_windowgauss(state_variable=state_variable, sum_stat=sum_stat, path=path)
+
+    else:
+        print("Invalid choice.")
+
+    again = input("\nRun another test? [Y/n] ")
+    if again.lower() == 'y':
+        user_input_tests_looper(path=path)
+    elif again.lower() == 'n':
+        print("Exited EWS test suite. Goodbye.")
+    else:
+        print("Invalid input, terminated plotmaker. Goodbye.")
+
+
+if __name__ == "__main__":
+    user_input_tests_looper()

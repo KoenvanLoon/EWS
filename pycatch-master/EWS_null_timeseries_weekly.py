@@ -2,7 +2,7 @@
 EWS - Early Warning Signals
 Null models timeseries weekly
 
-@authors: KoenvanLoon & TijmenJanssen
+@authors: KoenvanLoon
 """
 
 import numpy as np
@@ -11,12 +11,8 @@ import statsmodels.api
 import os
 import EWSPy as ews
 import EWS_configuration as cfg
-import matplotlib.pyplot as plt
-
 
 ### Null models timeseries (Dakos et al. 2008) ###
-
-# TODO - method 2 did not return the right mean - check solution -, check method 3
 
 # Detrend dataset
 """
@@ -43,14 +39,20 @@ detrended_data : The detrended timeseries data.
 
 
 def detrend_(data, realizations=1, path='./1/', variable='xxx'):
-    detrended_data = data
+    detrended_data = data.copy()
 
     if cfg.detrended_method == 'Gaussian':
-        gaussian_filter = ndimage.gaussian_filter1d(data, cfg.detrended_sigma)
-        detrended_data -= gaussian_filter
-    elif cfg.detrended_method == 'Linear':
+        if cfg.detrended_sigma == 0:
+            # Sigma = 0 corresponds to no smoothing (identity operation), so, in sensitivity analyses, sigma = 0 is
+            #   interpreted as "no detrending".
+            gaussian_filter = np.zeros_like(data)
+            detrended_data = data.copy()
+        else:
+            gaussian_filter = ndimage.gaussian_filter1d(data, cfg.detrended_sigma)
+            detrended_data -= gaussian_filter
+    elif cfg.detrended_method == 'MeanLinear':
         detrended_data = signal.detrend(data, bp=np.arange(0, cfg.number_of_timesteps_weekly, variable.window_size))
-    elif cfg.detrended_method is not 'None':
+    elif cfg.detrended_method != 'None':
         print("Invalid input for detrending_temp in generate_datasets (EWS_weekly.py). No detrending done.")
 
     if cfg.save_detrended_data:
@@ -65,11 +67,13 @@ def detrend_(data, realizations=1, path='./1/', variable='xxx'):
         fpath1 = os.path.join(dir_name, fname1)
         np.savetxt(fpath1 + '.numpy.txt', detrended_data)
 
+        gaussian_filter = None
         if cfg.detrended_method == 'Gaussian':
             fname2 = ews.file_name_str(variable.name + 'g', cfg.number_of_timesteps_weekly)
             fpath2 = os.path.join(dir_name, fname2)
+            # noinspection PyTypeChecker
             np.savetxt(fpath2 + '.numpy.txt', gaussian_filter)
-        if cfg.detrended_method == 'Linear':
+        if cfg.detrended_method == 'MeanLinear':
             fname2 = ews.file_name_str(variable.name + 'l', cfg.number_of_timesteps_weekly)
             fpath2 = os.path.join(dir_name, fname2)
             np.savetxt(fpath2 + '.numpy.txt', data - detrended_data)
@@ -144,6 +148,7 @@ replace : bool, selects whether new values are picked from the original dataset 
 
 def method2_(data, realizations=1, method='Detrending', path='./1/', variable='xxx', replace=False):
     generated_number_length = ews.generated_number_length(realizations)
+    lin_detr = None
     if method == 'Detrending':
         detrended_data = signal.detrend(data, bp=np.arange(0, cfg.number_of_timesteps_weekly, variable.window_size))
         lin_detr = data - detrended_data
@@ -160,20 +165,20 @@ def method2_(data, realizations=1, method='Detrending', path='./1/', variable='x
             fft_phases_left_half = fft_phases[1:i]
             fft_shuffled_phases_lh = np.random.choice(fft_phases_left_half, len(fft_phases_left_half), replace=replace)
             fft_shuffled_phases_rh = - fft_shuffled_phases_lh[::-1]
-            fft_phases_new = np.concatenate((np.array((fft_[0],)), fft_shuffled_phases_lh, np.array((fft_phases[i],)),
+            fft_phases_new = np.concatenate((np.array((0.0,)), fft_shuffled_phases_lh, np.array((fft_phases[i],)),
                                              fft_shuffled_phases_rh))
         else:
             i = int(len(fft_phases_new) / 2 + 1)
             fft_phases_left_half = fft_phases[1:i]
             fft_shuffled_phases_lh = np.random.choice(fft_phases_left_half, len(fft_phases_left_half), replace=replace)
             fft_shuffled_phases_rh = - fft_shuffled_phases_lh[::-1]
-            fft_phases_new = np.concatenate((np.array((fft_[0],)), fft_shuffled_phases_lh,
+            fft_phases_new = np.concatenate((np.array((0.0,)), fft_shuffled_phases_lh,
                                              fft_shuffled_phases_rh))
 
         fft_sym = fft_mag * (np.cos(fft_phases_new) + 1j * np.sin(fft_phases_new))
         generated_dataset = fft.ifft(fft_sym)
+        generated_dataset = np.real(generated_dataset)
 
-        generated_dataset = np.absolute(generated_dataset)  # TODO - Check if this is correct
         if method == 'Detrending':
             generated_dataset = generated_dataset + lin_detr
 
@@ -220,15 +225,20 @@ def method3_(data, realizations=1, method='Normal', path='./1/', variable='xxx',
     alpha0_1 = np.nanmean(data) * (1 - alpha1[1])
     alpha0_2 = np.nanmean(data)
 
+    rho = alpha1[1]
+    if abs(rho) >= 1:
+        raise ValueError("AR(1) coefficient outside stationary range")
+
     for realization in range(realizations):
-        e = np.random.normal(loc=0.0, scale=stdev_error, size=len(data))
-        AR1m = np.ones(len(data)) * alpha0_2
+        e = np.random.normal(0.0, 1.0, size=len(data))
         if method == 'Adjusted':
-            for i in range(len(data)):
+            AR1m = np.ones(len(data)) * alpha0_1
+            for i in range(1, len(data)):
                 AR1m[i] = alpha1[1] * AR1m[i - 1] + alpha0_1 + np.sqrt(sig2) * e[i]
         elif method == 'Normal':
-            for i in range(len(data)):
-                AR1m[i] = alpha1[1] * AR1m[i - 1] + alpha0_2 + e[i]
+            AR1m = np.ones(len(data)) * alpha0_2
+            for i in range(1, len(data)):
+                AR1m[i] = alpha1[1] * AR1m[i - 1] + alpha0_2 + np.sqrt(sig2) * e[i]
         generated_dataset = AR1m
 
         generated_number_string = 'm3g' + str(realization).zfill(generated_number_length)

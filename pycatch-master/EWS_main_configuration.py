@@ -1,53 +1,106 @@
 import pathlib
 
-## Time steps for hourly/weekly model runs
-# - TODO replace numberOfTimeSteps for number_of_timesteps_hourly
-# Define number of hourlyy time steps to run
+"""
+Note:
+
+Units of modelled state variables are documented in EWS_StateVariables.py,
+    this configuration file follows the original pycatch model conventions.
+"""
+
+#########################################
+# Time steps for hourly/weekly model runs
+#########################################
+
+# Define number of hourly time steps to run
 number_of_timesteps_hourly = 2000  # in hours
 # number_of_timesteps_hourly = 8760 # ~1y in hours
 
 # Define number of weekly time steps to run
 # number_of_timesteps_weekly = 5000  # in weeks
-number_of_timesteps_weekly = 104000 # ~2000y in weeks
+number_of_timesteps_weekly = 104000  # ~2000y in weeks
 
-## Rate of forcing (grazing)
+# ! Note: Intentionally long run for slow forcing relative to internal dynamics & EWS detection, not intended to
+#           represent realistic environmental timescales.
+
+###########################
+# Rate of forcing (grazing)
+###########################
+
 # Define the fraction of total time at which no grazing occurs at the beginning (baseline for initial state)
-rel_start_grazing = 0  # 1/8
-# rel_start_grazing = 0
+rel_start_grazing = 0.1
+rel_end_grazing = 0.8
+
 # Define the total increase in grazing rate
-tot_increase_grazing = 0.00025
-# tot_increase_grazing = 0.0006
+# High carrying capacity
+# tot_increase_grazing = 0.0000705
+# initial_grazing = 0.00047
+# waterUseEfficiency = 5.0 * 1.75
+# maintenanceRate = (0.5 / 1.75) / (365.0 * 24.0)
+
+# Intermediate carrying capacity
+# tot_increase_grazing = 0.00003
+# initial_grazing = 0.0002
+# waterUseEfficiency = 5.0
+# maintenanceRate = 0.5 / (365.0 * 24.0)
+
+# Low carrying capacity : tot increase of 0.000055
+tot_increase_grazing = 0.000018
+initial_grazing = 0.00012
+waterUseEfficiency = 5.0 / 1.25
+maintenanceRate = (0.5 * 1.25) / (365.0 * 24.0)
+
 # Select whether grazing rate returns to the initial value after the halfway point
 # - note that this halfway point occurs on (1 - rel_start) * total time / 2
 return_ini_grazing = False
 
-## Number of Monte Carlo (MC) runs
+#################################
+# Number of Monte Carlo (MC) runs
+#################################
+
 # Define the number of MC samples or particles, results of realizations are written to the folder(s) 1, 2, ...
 nrOfSamples = 1
 
-## Particle filtering
+# !NOTE: nrOfSamples = 1 implies deterministic single-run output.
+#   Monte Carlo ensembles are generated separately for null models.
+
+####################
+# Particle filtering
+####################
+
 # When True, a particle filtering run is done, usually False for first time users
 filtering = False
 
-## Create realizations
+#####################
+# Create realizations
+#####################
+
 # Selects whether a single, given value is used for a number of parameters or whether a realization for that parameter
 # is drawn randomly. Usually False for first time users.
 createRealizations = False
 
-## Calculate upstream totals
+###########################
+# Calculate upstream totals
+###########################
+
 # Selects whether upstream totals are calculated (accuflux) in the subsurfacewateronelayer and interceptionuptomaxstore
 # modules. May be needed for some reports and possibly budget checks (if one needs these). For normal use, this is set
 # to False.
 calculateUpstreamTotals = False
 
-## Duration of rainstorms
-#theDurationOfRainstorm = 2.0
+########################
+# Duration of rainstorms
+########################
+
+# theDurationOfRainstorm = 2.0
 rainstorm_probability = 0.4
 rainstorm_duration = 2.0
 rainstorm_expected_intensity = 0.002
 rainstorm_gamma_shape_param = 100
 
-## Reporting of variables
+########################
+# Reporting of variables
+########################
+
 # Selects which set of variables are reported, either 'full' or 'filtering'. These are passed to the class of a
 # component where the variables that can be reported can be defined.
 setOfVariablesToReport = 'full'
@@ -60,19 +113,25 @@ changeGeomorphology = True
 # Option to fix both the regolith and the vegetation in the weekly model, typically False
 fixedStates = False
 
-## Timesteps to report variables for both hourly and weekly
+##########################################################
+# Timesteps to report variables for both hourly and weekly
+##########################################################
 
 # Saving map files which can be used for spatial EWS or hourly model
-"Weekly only"  # TODO - Might be worthwhile to implement this into the hourly model
 map_data = True
 mean_timeseries_data = True
 loc_timeseries_data = True
 interval_map_snapshots = 100
 
+assert interval_map_snapshots > 0
+assert number_of_timesteps_weekly % interval_map_snapshots == 0, \
+    "interval_map_snapshots must divide number_of_timesteps_weekly"
+
+
 # definition for components were all timesteps should be reported
 timesteps_to_report_all_hourly = list(range(1, number_of_timesteps_hourly + 1, 1))
-timesteps_to_report_all_weekly = list(range(0, number_of_timesteps_weekly + 1,
-                                            interval_map_snapshots))
+timesteps_to_report_all_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))
+# Note; weekly timesteps start at 0 to include the initial condition. This snapshot is NOT used for temporal EWS calculations, only for spatial diagnostics.
 # timeStepsToReportAll = list(range(1, number_of_timesteps_hourly + 1, 1))
 
 # Used for discharge (hourly model only)
@@ -81,23 +140,34 @@ timeStepsToReportRqs = list(range(20, number_of_timesteps_hourly + 1, 20))
 # definition for components were a subset of timesteps should be reported
 timesteps_to_report_some_hourly = list(range(100, number_of_timesteps_hourly + 1, 100))
 timesteps_to_report_some_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))
+# Note; weekly timesteps start at 0 to include the initial condition. This snapshot is NOT used for temporal EWS calculations, only for spatial diagnostics.
 # timeStepsToReportSome = list(range(100, number_of_timesteps_hourly + 1, 100))
 
+#####################################################################################
+# State variables for which to calculate Early Warning Signals (both hourly & weekly)
+#####################################################################################
 
-## State variables for which to calculate Early Warning Signals (both hourly & weekly)
 # - TODO change state_variables_for_ews to state_variables_for_ews_hourly
-# - TODO check the 'full' list in EWS_StateVariables.py
-state_variables_for_ews_hourly = ['Gs']
-# state_variables_for_ews_hourly = 'full'
-state_variables_for_ews_weekly = ['bioA', 'moiA']
-# state_variables_for_ews_weekly = 'full'
 
-## Reporting for the model components (both hourly and weekly)
+# state_variables_for_ews_hourly = ['Gs']
+state_variables_for_ews_hourly = 'full'
+# state_variables_for_ews_weekly = ['bioA', 'moiA']
+state_variables_for_ews_weekly = 'full'
+
+# 'full' Is susceptible to typo's, always make sure to double check when you make changes to it!
+#   Added this line below to raise an Error when it goes awry;
+if state_variables_for_ews_weekly not in ['full'] and not isinstance(state_variables_for_ews_weekly, list):
+    raise ValueError("state_variables_for_ews_weekly must be 'full' or a list of variable names.")
+
+#############################################################
+# Reporting for the model components (both hourly and weekly)
+#############################################################
+
 if setOfVariablesToReport == 'full':
     interception_report_rasters = ["Vo", "Vi", "Vgf", "Vms"]
     #   reports of totals (Vot) only make sense if calculateUpstreamTotals is True
     infiltration_report_rasters_weekly = ["Ii", "Is", "Iks"]
-    infiltration_report_rasters = ["Ii", "Ij", "Is", "Iks"]  # TODO - might want to rename this to ""_hourly, as above
+    infiltration_report_rasters = ["Ii", "Ij", "Is", "Iks"]
     runoff_report_rasters = ["Rq", "Rqs"]
     subsurface_report_rasters = ["Gs", "Go"]
     #   reports of totals (Gxt, Got) only make sense if calculateUpstreamTotals is True
@@ -182,8 +252,10 @@ readDistributionOfParametersFromDisk = False
 
 
 with_shading = True
-
-if with_shading is False:
+if with_shading:
+    fractionReceivedValue = 0.0
+    fractionReceivedFlatSurfaceValue = 0.0
+else:
     fractionReceivedValue = 1.0
     fractionReceivedFlatSurfaceValue = 1.0
 
@@ -194,10 +266,8 @@ if with_shading is False:
 
 # general ########
 
-
-
 # set clone
-cloneString = str(pathlib.Path(inputFolder,"clone.map"))
+cloneString = str(pathlib.Path(inputFolder, "clone.map"))
 
 dem = str(pathlib.Path(inputFolder, "demini.map"))
 # report locations, i.e. outflow points, for instance, at the outlet
@@ -244,11 +314,9 @@ regolithThicknessHomogeneousValue = 0.5
 # location of the stream, used to adjust regolith thickness there
 streamValue = str(pathlib.Path(inputFolder, "mergeStream.map"))
 
-
-
-#TIJMEN reeds verandert in w-model parameters
+# TIJMEN reeds verandert in w-model parameters
 # 'groundwater' (saturated flow) ##########
-saturatedConductivityMetrePerDayValue = 37.0 #(hocus pocus, opzoeken inw)
+saturatedConductivityMetrePerDayValue = 12.5    # (hocus pocus, opzoeken inw)
 limitingPointFractionValue = 0.05
 mergeWiltingPointFractionFSValue = 0.019
 fieldCapacityFractionValue = 0.22
@@ -261,14 +329,13 @@ albedoValue = str(pathlib.Path(inputFolder, "mergeVegAlbedoFS.map"))
 maxStomatalConductanceValue = str(pathlib.Path(inputFolder, "mergeVegStomatalFS.map"))
 vegetationHeightValue = str(pathlib.Path(inputFolder, "mergeVegHeightFS.map"))
 
-#Tijmen edit:
+# Tijmen edit:
 albedoSoil = 0.3
 albedoVeg = 0.2
 
 
 # dem geometry ###########
-#TIJMEN uitgezet
-#lddMap = str(pathlib.Path(inputFolder, "mergeldd.map"))
+lddMap = str(pathlib.Path(inputFolder, "mergeldd.map"))
 
 
 # real time of first time step, duration of time step

@@ -6,6 +6,8 @@ EWS Configuration (cfg)
 """
 
 import pathlib
+import EWS_main_configuration as mcfg
+# !NOTE: This configuration mirrors EWS_main_configuration.py unless explicitly overridden here.
 
 # Pycatch configuration
 """
@@ -111,30 +113,26 @@ cloneString = str(pathlib.Path(inputFolder, "clone.map"))
 locations = str(pathlib.Path(inputFolder, "clone.map"))
 
 # Duration of model runs
-number_of_timesteps_hourly = 8760  # ~1y in hours (24 hours per day)
-# number_of_timesteps_hourly = 2000  # smaller test-run
-number_of_timesteps_weekly = 104000  # ~2000y in weeks (52 weeks per year)
-# number_of_timesteps_weekly = 5200  # smaller test-run of ~100y in weeks
+number_of_timesteps_hourly = mcfg.number_of_timesteps_hourly
+number_of_timesteps_weekly = mcfg.number_of_timesteps_weekly
 
 # Saving spatial data
-map_data = True
-interval_map_snapshots = 100
+map_data = mcfg.map_data
+interval_map_snapshots = mcfg.interval_map_snapshots
 
 # Saving temporal data
-mean_timeseries_data = True
-loc_timeseries_data = True
+mean_timeseries_data = mcfg.mean_timeseries_data
+loc_timeseries_data = mcfg.loc_timeseries_data
 
 # Reporting of variables
-# setOfVariablesToReport = 'full'
-setOfVariablesToReport = 'filtering'
-# setOfVariablesToReport = 'None'
+setOfVariablesToReport = mcfg.setOfVariablesToReport
 
 # Timesteps of reporting variables
-timesteps_to_report_all_hourly = list(range(1, number_of_timesteps_hourly + 1, 1))  # TODO - set step-size to map interval?
-timesteps_to_report_all_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))
+timesteps_to_report_all_hourly = list(range(1, number_of_timesteps_hourly + 1, 1))
+timesteps_to_report_all_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))  # Weekly timesteop 0 corresponds to the initial state snapshot
 
-timesteps_to_report_some_hourly = list(range(100, number_of_timesteps_hourly + 1, 100))  # TODO - set step-size to map interval?
-timesteps_to_report_some_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))
+timesteps_to_report_some_hourly = list(range(100, number_of_timesteps_hourly + 1, 100))
+timesteps_to_report_some_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))    # Weekly timesteop 0 corresponds to the initial state snapshot
 
 # Hourly model report as numpy
 doReportComponentsDynamicAsNumpy = False
@@ -165,59 +163,49 @@ swapCatchments = False
 
 # Rainstorm parameters
 # # scenario: original
-rainstorm_probability = 0.4
-rainstorm_duration = 2.0
-rainstorm_expected_intensity = 0.002
-rainstorm_gamma_shape_param = 100
+rainstorm_probability = mcfg.rainstorm_probability
+rainstorm_duration = mcfg.rainstorm_duration
+rainstorm_expected_intensity = mcfg.rainstorm_expected_intensity  # m/hour?
+rainstorm_gamma_shape_param = mcfg.rainstorm_gamma_shape_param
 
 # Surface store
-maxSurfaceStoreValue = 0.0001
+maxSurfaceStoreValue = mcfg.maxSurfaceStoreValue
 
 # Groundwater (saturated flow) and soil (moisture) parameters
-saturatedConductivityMetrePerDayValue = 12.5
-limitingPointFractionValue = 0.05
-mergeWiltingPointFractionFSValue = 0.019
-fieldCapacityFractionValue = 0.22
+saturatedConductivityMetrePerDayValue = mcfg.saturatedConductivityMetrePerDayValue
+limitingPointFractionValue = mcfg.limitingPointFractionValue
+mergeWiltingPointFractionFSValue = mcfg.mergeWiltingPointFractionFSValue
+fieldCapacityFractionValue = mcfg.fieldCapacityFractionValue
 
+# Initial soil moisture fraction for EWS runs
+# Set explicitely to avoid dependency on hourly spin-up state
 initialSoilMoistureFractionCFG = 0.22
-soilPorosityFractionValue = 0.43
+soilPorosityFractionValue = mcfg.soilPorosityFractionValue
 
 # Grazing increase start
-rel_start_grazing = 0.1
-rel_end_grazing = 0.8
+# Make sure 0 <= rel_start_grazing < rel_end_grazing <= 1
+rel_start_grazing = mcfg.rel_start_grazing
+rel_end_grazing = mcfg.rel_end_grazing
 return_ini_grazing = False
 
-# Carrying capacity scenarios
+assert 0 <= rel_start_grazing < rel_end_grazing <= 1, \
+    "Grazing start/end ratios must satisfy 0 <= start < end <= 1"
 
-# High carrying capacity
-# tot_increase_grazing = 0.0000705
-# initial_grazing = 0.00047
-# waterUseEfficiency = 5.0 * 1.75
-# maintenanceRate = (0.5 / 1.75) / (365.0 * 24.0)
-
-# Intermediate carrying capacity
-tot_increase_grazing = 0.00003
-initial_grazing = 0.0002
-waterUseEfficiency = 5.0
-maintenanceRate = 0.5 / (365.0 * 24.0)
-
-# Low carrying capacity : tot increase of 0.000055
-# tot_increase_grazing = 0.000018
-# initial_grazing = 0.00012
-# waterUseEfficiency = 5.0 / 1.25
-# maintenanceRate = (0.5 * 1.25) / (365.0 * 24.0)
+# Carrying capacity
+tot_increase_grazing = mcfg.tot_increase_grazing
+initial_grazing = mcfg.initial_grazing
+waterUseEfficiency = mcfg.waterUseEfficiency
+maintenanceRate = mcfg.maintenanceRate
 
 # Real-time of first time step of model run(s)
 # ! - Note: This is now UTC time almost certainly at least for shading.
-startTimeYearValue = 2005
-startTimeMonthValue = 7
-startTimeDayValue = 1
+startTimeYearValue = mcfg.startTimeYearValue
+startTimeMonthValue = mcfg.startTimeMonthValue
+startTimeDayValue = mcfg.startTimeDayValue
 
 # Shading
-with_shading = True  # TODO - Check if this can be deleted
-if with_shading is False:
-    fractionReceivedValue = 1.0
-    fractionReceivedFlatSurfaceValue = 1.0
+fractionReceivedValue = mcfg.fractionReceivedValue
+fractionReceivedFlatSurfaceValue = mcfg.fractionReceivedFlatSurfaceValue
 
 # EWS configuration
 """
@@ -268,38 +256,45 @@ cutoff_point : Time at which states shift. Retrieved from plotting the biomass t
 """
 
 # State variables
-state_variables_for_ews_hourly = ['Gs']
-# state_variables_for_ews_hourly = 'full'  # - TODO check the 'full' list in EWS_StateVariables.py
-# state_variables_for_ews_weekly = ['bioA', 'bioM']
-state_variables_for_ews_weekly = 'full'  # - TODO check the 'full' list in EWS_StateVariables.py
+# - 'full' must match EWS_StateVariables.py
+state_variables_for_ews_hourly = mcfg.state_variables_for_ews_hourly
+state_variables_for_ews_weekly = mcfg.state_variables_for_ews_weekly
 
-# Loop over snapshots in hourly model
+# Number of weekly snapshots used around the transition (snapshots, not raw timesteps)
 stepsInShift = 20
 stepsTotal = 30
 
 # Generate null models
-generate_dummy_datasets = False
-nr_generated_datasets = 100
+generate_dummy_datasets = True
+nr_generated_datasets = 10  # 100 for final analyses (where computationally feasible - takes some time & power!)
 
 # Methods for generated null models
+# !NOTE: Enabling all null-model methods simultaneously increases runtime significantly, *especially* when coupled with
+#           a high number of generated datasets.
+#   Shuffle
 method_1 = True
+#   Fourier
 method_2 = True
+#   AR(1)
 method_3 = True
 
 # Data detrending
-detrended_method = 'None'
+detrended_method = 'None'   # 'None', 'MeanLinear', 'Gaussian'
+# !NOTE: 'MeanLinear': mean-centring for spatial data, linear detrending for timeseries
 detrended_sigma = 100
 save_detrended_data = True
 
 # Cutoff transition
 cutoff = False
-cutoff_point = 48000  # TODO - Implement a way to cutoff data before/at (?) CT --> if tuple, elif int/scalar.
+cutoff_point = 48000  # Cutoff at set timestep, refers to last timestep included (not snapshot index).
 
 # Reporting for the model components (both hourly and weekly)
 """
 Reporting model components of the pycatch model (see time_steps_to_report_all/some_hourly/weekly and 
 timeStepsToReportRqs)
 
+NOTE:
+    Reporting configuration is duplicated here to allow EWS-specific overrides without mutating the base pycatch configuration.
 """
 
 if setOfVariablesToReport == 'full':
@@ -365,3 +360,29 @@ elif setOfVariablesToReport == 'None':
     baselevel_report_rasters = []
     creep_report_rasters = []
     randomparameters_report_rasters = []
+
+# Plot styling config
+"""
+One configuration to rule them all
+"""
+
+# Default categorical colour cycle for EWS plots
+EWS_colour_cycle = [
+    "#1f77b4",  # muted blue
+    "#ff7f0e",  # orange
+    "#2ca02c",  # green
+    "#d62728",  # red
+    "#9467bd",  # purple
+    "#8c564b",  # brown
+    "#e377c2",  # pink
+    "#7f7f7f",  # gray
+    "#bcbd22",  # olive
+]
+
+# Default line width for time series
+EWS_linewidth = 1.8
+
+# Default scatter style
+EWS_scatter_size = 35
+EWS_scatter_alpha = 0.85
+EWS_scatter_edgewith = 0.4

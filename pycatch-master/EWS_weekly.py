@@ -12,8 +12,8 @@ import time
 
 import EWSPy as ews
 import EWS_configuration as cfg
-import NULL_models_timeseries_weekly as temp_NULL
-import NULL_models_spatial_weekly as spat_NULL
+import EWS_null_timeseries_weekly as temp_NULL
+import EWS_null_spatial_weekly as spat_NULL
 import EWS_StateVariables as ews_sv
 
 
@@ -55,8 +55,10 @@ elif cfg.cutoff:
 
 # Time series to time windows
 """
-Divides a time series (2D numpy array) into an array of evenly sized time windows (2D numpy arrays). If remaining data-
+Divides a time series (1D numpy array) into an array of evenly sized time windows (2D numpy arrays). If remaining data-
 points do not fill the last time window, they are dropped from the stack of time windows.
+
+Uses stride tricks for performance, assumes contiguous input and valid window size.
 
 Args:
 -----
@@ -80,14 +82,16 @@ view : A 3D numpy array containing evenly sized time windows (2D numpy arrays).
 
 
 def time_series2time_windows(timeseries, window_size=100, window_overlap=0):
+    # actual step size between windows
     actual_window_overlap = window_size - window_overlap
     sh = (timeseries.size - window_size + 1, window_size)
     st = timeseries.strides * 2
+    if timeseries.size < window_size:
+        return np.empty((0, window_size))
     if window_overlap != 0:
-        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[0::actual_window_overlap]
+        return np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[0::actual_window_overlap]
     elif window_overlap == 0:
-        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[0::window_size]
-    return view
+        return np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[0::window_size]
 
 
 # Generate datasets (initial)
@@ -143,9 +147,8 @@ def generate_datasets_init(variable, path='./1/', nr_realizations=1, method1=Fal
             state_variable_snapshots = np.asarray(state_variable_snapshots)
 
             # Generate dummy datasets
-            # Detrending: 'None', 'Linear', 'Gaussian'
-            state_variable_snapshots = generate_datasets_main(variable, state_variable_snapshots, spat_NULL.detrend_,
-                                                              nr_realizations=nr_realizations, path=path)
+            # Detrending: 'None', 'MeanLinear', 'Gaussian'
+            generate_datasets_main(variable, state_variable_snapshots, spat_NULL.detrend_, nr_realizations=nr_realizations, path=path)
             if method1:
                 generate_datasets_main(variable, state_variable_snapshots, spat_NULL.method1_,
                                        nr_realizations=nr_realizations, path=path)
@@ -185,10 +188,11 @@ detrended_data : Optional return, only returns when method==detrend_ for time se
 
 def generate_datasets_main(variable, state_variable, method, nr_realizations=1, path='./1/'):
     print(f"Started generating dataset(s) for {variable.name} using {method.__name__}")
-    detrended_data = method(state_variable, realizations=nr_realizations, path=path, variable=variable)
+    result = method(state_variable, realizations=nr_realizations, path=path, variable=variable)
     print(f"Finished generating dataset(s) for {variable.name} using {method.__name__} \n")
-    if method.__name__ == temp_NULL.detrend_.__name__:
-        return detrended_data
+    if method is temp_NULL.detrend_:
+        return result
+    return None
 
 
 # Calculate EWS generated datasets (initial)
@@ -334,6 +338,7 @@ def window_stacker(variable, state_variable_timeseries):
                                                                variable.window_overlap)
         stack_x, stack_y, stack_z = np.asarray(stack_of_windows).shape
         stack_of_windows = np.asarray(stack_of_windows).reshape(-1, stack_z)
+        # All locations are assumed to share identical temporal resolution and window structure
     return stack_of_windows, nr_dim, stack_x, stack_y
 
 
@@ -365,12 +370,12 @@ def spatial_data_file_loading(variable, path='./1/'):
         for k, timestep in enumerate(spatial_ews_interval):
             file_name = ews.file_name_str(variable.name, timestep)
             if os.path.exists(path + file_name + ".numpy.txt"):
-                state_variable_snapshots[k] = np.loadtxt(path + file_name + 'numpy.txt')
+                state_variable_snapshots[k] = np.loadtxt(path + file_name + '.numpy.txt')
             else:
                 print(f"{file_name}.numpy.txt not found in {path}.")
                 EWS_calculations = False
 
-    if variable.datatype == 'map':
+    elif variable.datatype == 'map':
         for k, timestep in enumerate(spatial_ews_interval):
             file_name = ews.file_name_str(variable.name, timestep)
             if os.path.exists(path + file_name):
@@ -413,6 +418,7 @@ stack_x , stack_y : x and y component of a stack of windows for multiple locatio
 def ews_calc_and_save(variable, data, method_name, method_function, path='./1/', nr_dim=1, stack_x=1, stack_y=1):
     fpath = os.path.join(path + variable.name + method_name)
     signal = method_function(data)
+    # Assumes no NaNs or infs
     if nr_dim > 1:
         signal = signal.reshape(stack_x, stack_y)
     np.savetxt(fpath + '.numpy.txt', signal)
@@ -456,22 +462,29 @@ def temporal_ews_calculations(variable, state_variable_timeseries, path='./1/'):
     ews_calc_and_save(variable, stack_of_windows, '.t.rr', ews.temporal_returnrate, path=path, nr_dim=nr_dim,
                       stack_x=stack_x, stack_y=stack_y)
 
-    # Temporal dfa TODO - returns 3-4 values, save only 1?
+    # Temporal dfa
     fpath = os.path.join(path + variable.name + '.t.dfa')
-    _, _, _, temporal_statistic = ews.temporal_dfa(stack_of_windows, window_size=variable.window_size)
+    _, _, _, temporal_statistic = ews.temporal_dfa(stack_of_windows, return_all=True)
+    # Only the DFA scaling exponent (propagator) is retained as the EWS indicator.
+    # DFA exponents are interpreted qualitatively; absolute values *are not* compared between variables.
+
     # scales, fluct, coeff, propagator (== temporal statistic)
     if nr_dim > 1:
         temporal_statistic = temporal_statistic.reshape(stack_x, stack_y)
     np.savetxt(fpath + '.numpy.txt', temporal_statistic)
 
-    # Temporal cond. het. TODO - returns 2 values, save only 1?
+    # Temporal cond. het.
     fpath = os.path.join(path + variable.name + '.t.coh')
     save_p = True
+
+    # Save (statistic, p-value) for 1D
     if save_p and nr_dim == 1:
         temporal_statistic = [[0.0], [0.0]]
         statistic, p_val = ews.temporal_cond_het(stack_of_windows)
         temporal_statistic[0] = statistic
         temporal_statistic[1] = p_val
+
+    # Save only statistic for spatial/multi-loc
     else:
         temporal_statistic, _ = ews.temporal_cond_het(stack_of_windows)  # _ is the p-value of the test, not saved
         if nr_dim > 1:
@@ -502,6 +515,10 @@ def spatial_ews_calculations(variable, state_variable_maps, path='./1/'):
     ews_calc_and_save(variable, state_variable_maps, '.s.skw', ews.spatial_skw, path=path)
     ews_calc_and_save(variable, state_variable_maps, '.s.krt', ews.spatial_krt, path=path)
     ews_calc_and_save(variable, state_variable_maps, '.s.mI', ews.spatial_corr, path=path)
+
+    # Spectral spatial EWS
+    ews_calc_and_save(variable, state_variable_maps, '.s.ps', ews.spatial_power_spec, path=path)
+    ews_calc_and_save(variable, state_variable_maps, '.s.dft', ews.spatial_DFT, path=path)
 
 
 # Initializing calculating and saving EWS for both spatial and temporal data
@@ -563,13 +580,12 @@ def ews_calculations_main(variable, loading_function, calculation_function, path
         print(f"Started EWS calculations for {variable.name} in {path}")
         if timer_on:
             start_time = time.time()
-
-        calculation_function(variable, state_variable, path=path)
-
-        if timer_on:
+            calculation_function(variable, state_variable, path=path)
             end_time = time.time()
             print(f"Elapsed time for EWS calculations for {variable.name} in {path} equals:", end_time - start_time,
                   '\n')
+        else:
+            calculation_function(variable, state_variable, path=path)
 
 
 # EWS calculations & optional data generation and EWS calculations for results of the weekly model
@@ -614,4 +630,5 @@ def EWS_hourly_calculations():
     print(f"Total elapsed time equals: {end_time} seconds")
 
 
-EWS_weekly_calculations()
+if __name__ == "__main__":
+    EWS_weekly_calculations()

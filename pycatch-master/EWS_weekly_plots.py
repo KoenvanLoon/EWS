@@ -6,7 +6,6 @@ EWS weekly plots
 """
 
 import numpy as np
-import math
 import os
 from cycler import cycler
 import matplotlib.pyplot as plt
@@ -15,6 +14,16 @@ from datetime import datetime
 import EWS_configuration as cfg
 import EWSPy as ews
 import EWS_StateVariables as ews_sv
+
+
+# Helper function for consistent style for plots
+def apply_ews_plot_style(ax, grid=False):
+    if grid:
+        ax.grid(which='major', linestyle='--', alpha=0.5)
+        ax.grid(which='minor', linestyle=':', alpha=0.25)
+    ax.minorticks_on()
+    ax.tick_params(direction='out', which='both', length=4, width=1)
+    ax.spines['top'].set_visible(False) # Cleans top spine for less clutter
 
 # State variables for EWS
 """
@@ -78,9 +87,80 @@ ews_temporal_signals = {'mn': "mean", 'std': "standard deviation", 'var': "varia
                         'cv': "coefficient of variation", 'skw': "skewness", 'krt': "kurtosis",
                         'dfa': "detrended fluctuation analysis", 'acr': "autocorrelation", 'AR1': "AR1",
                         'rr': "return rate", 'coh': "conditional heteroskedasticity", 'timeseries': "timeseries",
-                        'gauss': "gauss", 'linear': "linear"}
+                        'gauss': "gauss", 'meanlinear': "meanlinear"}
 ews_spatial_signals = {'mn': "mean", 'std': "standard deviation", 'var': "variance", 'skw': "skewness",
                        'krt': "kurtosis", 'mI': "Moran's I"}
+
+# EWS time-axis (x-axis) logic
+"""
+Constructs the time axis for plotting early-warning signals.
+
+The time axis depends on:
+- whether the variable is spatial or temporal
+- the snapshot interval (spatial) or rolling window structure (temporal)
+- whether a cutoff point is used
+
+Temporal EWS are plotted at the END of each rolling window.
+Spatial EWS are plotted at each saved snapshot.
+
+Args:
+----
+variable : StateVariable
+    The state variable for which the EWS is plotted.
+
+number_of_timesteps : int
+    Total number of timesteps of the model run.
+
+Returns:
+----
+x_axis : numpy.ndarray
+    Time axis corresponding to the EWS values.
+"""
+
+
+def ews_time_axis(variable, number_of_timesteps):
+    if variable.spatial:
+        start = cfg.interval_map_snapshots
+        step = start
+    else:
+        start = variable.window_size
+        step = variable.window_size - variable.window_overlap
+
+    end = cfg.cutoff_point if cfg.cutoff else number_of_timesteps
+    x = np.arange(start, end + 1, step)
+    return x[x <= end]
+
+# EWS signal-label logic
+"""
+Returns a human-readable label for an early-warning signal.
+
+Selects the appropriate signal dictionary depending on whether
+the variable is temporal or spatial.
+
+Args:
+----
+variable : StateVariable
+    The state variable for which the signal is plotted.
+
+signal : str
+    Short-hand name of the EWS (e.g. 'std', 'acr', 'mI').
+
+Returns:
+----
+label : str
+    Human-readable name of the EWS.
+"""
+
+
+def signal_label(variable, signal):
+    if variable.temporal:
+        if signal not in ews_temporal_signals:
+            raise ValueError(f"Unknown temporal ES '{signal}'")
+        return ews_temporal_signals[signal]
+    else:
+        if signal not in ews_spatial_signals:
+            raise ValueError(f"Unknown spatial ES '{signal}'")
+        return ews_spatial_signals[signal]
 
 # User inputs for weekly-hourly coupled plots
 """
@@ -117,7 +197,10 @@ def user_input_weekly_hourly_coupled():
         print("Enter the short name for the timeseries:")
         timeseries_input = input()
 
-        ts_weekly = [ts for ts in timeseries if ts.name == timeseries_input][0]
+        matches = [ts for ts in timeseries if ts.name == timeseries_input]
+        if not matches:
+            raise ValueError(f"Unknown timeseries '{timeseries_input}'")
+        ts_weekly = matches[0]
         if ts_weekly.temporal:
             timeseries_list.append(ts_weekly)
         elif ts_weekly.spatial:
@@ -145,7 +228,10 @@ def user_input_weekly_hourly_coupled():
 
         print(f"Enter the short name for state variable {nr_of_variables}")
         variable_input = input()
-        variable_name = [var for var in variables if var.name == variable_input][0]
+        matches = [var for var in variables if var.name == variable_input]
+        if not matches:
+            raise ValueError(f"Unknown variable '{variable_input}'")
+        variable_name = matches[0]
         variables_list.append(variable_name)
 
         if variable_name.temporal:
@@ -228,7 +314,7 @@ Optional : Plot of weekly timeseries and hourly EWS, optionally saved to disk.
 
 def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_on=False, numbers_on=False,
                                      legend=False, save=False, show=False):
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(constrained_layout=True)
 
     snapshot_timeseries = np.loadtxt('./snapshot_times.numpy.txt')
     timeseries_x_axis = np.arange(0, cfg.number_of_timesteps_weekly, 1)
@@ -236,7 +322,7 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
     nr_of_variables = len(timeseries) + len(variables)
     axes = [ax1]
     plots = []
-    offset = 60
+    offset = max(40, 300 // max(1, nr_of_variables))
     for i in np.arange(nr_of_variables):
         if nr_of_variables > i + 1:
             ax = ax1.twinx()
@@ -244,11 +330,10 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
             axes.append(ax)
 
     # Grid
-    ax1.grid(which='minor', linestyle=':', alpha=0.2)
-    ax1.grid(which='major', linestyle='--', alpha=0.5)
+    apply_ews_plot_style(ax1, grid=True)
 
     # X axis label (uses only 1 for the whole plot)
-    ax1.set_xlabel("time (weeks)")
+    ax1.set_xlabel("time (weeks, window end)")
 
     # Linestyles
     linestyles = [
@@ -264,7 +349,7 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
     ]
 
     # Colours list
-    colours_list = [plt.cm.tab10(i) for i in np.linspace(0, 1, 9)]
+    colours_list = cfg.EWS_colour_cycle
 
     for i in np.arange(nr_of_variables):
         ax = axes[i]
@@ -277,11 +362,11 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
             fname_ts_weekly = ews.file_name_str(timeseries[i].name, cfg.number_of_timesteps_weekly)
             fpath_ts_weekly = f"./inputs_from_weekly/{fname_ts_weekly}"
             timeseries_y_axis = np.loadtxt(fpath_ts_weekly + '.numpy.txt')
-            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, label=f"{timeseries[i].full_name} timeseries")
+            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, linewidth=cfg.EWS_linewidth, label=f"{timeseries[i].full_name} timeseries")
             ax.set_ylabel(f"{timeseries[i].full_name} timeseries ({timeseries[i].unit})", color=plot[0].get_color())
 
             # Ticks
-            ax.minorticks_on()
+            apply_ews_plot_style(ax, grid=False)
             ax.tick_params(axis='y', which='both', colors=colours[0])
             plt.setp(ax.get_yticklabels(), color=colours[0])
 
@@ -292,6 +377,7 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
             snapshot_y_axis = []
             snapshot_x_axis = snapshot_timeseries
 
+            dim = None
             if variables[i - len(timeseries)].temporal:
                 dim = '.t.'
             elif variables[i - len(timeseries)].spatial:
@@ -307,14 +393,16 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
                 elif statistic.ndim == 1:
                     snapshot_y_axis.append(statistic[-1])
 
-            if variables[i - len(timeseries)].temporal:
-                slabel = f'{variables[i - len(timeseries)].full_name} {ews_temporal_signals[signals[i - len(timeseries)]]}'
-                plot = ax.scatter(snapshot_x_axis, snapshot_y_axis, label=slabel)
-                ax.set_ylabel(f'{ews_temporal_signals[signals[i - len(timeseries)]]}', color=colours[0])
-            elif variables[i - len(timeseries)].spatial:
-                slabel = f'{variables[i - len(timeseries)].full_name} {ews_spatial_signals[signals[i - len(timeseries)]]}'
-                plot = ax.scatter(snapshot_x_axis, snapshot_y_axis, label=slabel)
-                ax.set_ylabel(f'{ews_spatial_signals[signals[i - len(timeseries)]]}', color=colours[0])
+            var = variables[i - len(timeseries)]
+            sig = signals[i - len(timeseries)]
+
+            label = signal_label(var, sig)
+            slabel = f"{var.full_name} {label}"
+
+            plot = ax.scatter(snapshot_x_axis, snapshot_y_axis, label=slabel, s=cfg.EWS_scatter_size,
+                              alpha=cfg.EWS_scatter_alpha, edgecolors='k', linewidths=cfg.EWS_scatter_edgewith)
+
+            ax.set_ylabel(label, color=colours[0])
 
             if trendline_on:
                 z = np.polyfit(snapshot_x_axis, snapshot_y_axis, 1)
@@ -322,8 +410,8 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
                 ax.plot(snapshot_x_axis, p(snapshot_x_axis), "r--")
 
             if numbers_on:
-                for i, nr in enumerate(snapshot_timeseries):
-                    ax.annotate(int(i), (snapshot_x_axis[i], snapshot_y_axis[i]))
+                for k, nr in enumerate(snapshot_timeseries):
+                    ax.annotate(int(k), (snapshot_x_axis[k], snapshot_y_axis[k]))
 
             # Ticks
             ax.minorticks_on()
@@ -335,24 +423,25 @@ def plot_maker_weekly_hourly_coupled(timeseries, variables, signals, trendline_o
     # Legend
     if legend:
         labs = [p.get_label() for p in plots]
-        ax1.legend(plots, labs)
+        ax1.legend(plots, labs, loc='upper right', frameon=False, fontsize=9)
 
     # Saving file
-    fig.tight_layout()
     if save:
-        format = "pdf"  # either "pdf" or "png"
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+        formats = ["svg", "pdf"]
         timestamp = datetime.now()
 
         dir_name = './plots/'
         if os.path.isdir(dir_name) == False:
             os.makedirs(dir_name)
 
-        if len(variables) > 1:
-            fig.savefig(dir_name + f"{variables[0].name}_{signals[0]}_{signals[1]}_with_{nr_of_variables}_variables"
-                        f"_{timestamp.hour}.{timestamp.minute}.{timestamp.second}.{format}", dpi=300, format=format)
-        else:
-            fig.savefig(dir_name + f"{variables[0].name}_{signals[0]}_{timestamp.hour}.{timestamp.minute}."
-                        f"{timestamp.second}.{format}", dpi=300, format=format)
+        for fmt in formats:
+            if len(variables) > 1:
+                fig.savefig(dir_name + f"{variables[0].name}_{signals[0]}_{signals[1]}_with_{nr_of_variables}_variables"
+                            f"_{timestamp.hour}.{timestamp.minute}.{timestamp.second}.{fmt}", dpi=300, format=fmt)
+            else:
+                fig.savefig(dir_name + f"{variables[0].name}_{signals[0]}_{timestamp.hour}.{timestamp.minute}."
+                            f"{timestamp.second}.{fmt}", dpi=300, format=fmt)
 
 
     # Showing plot
@@ -391,24 +480,23 @@ Optional : Plot of weekly timeseries and hourly EWS, optionally saved to disk.
 
 
 def plot_maker(variables_input, signals, path='/1/', legend=False, save=False, show=False):
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(constrained_layout=True)
 
     nr_of_variables = len(variables_input)
     axes = [ax1]
     plots = []
     offset = 70
-    for i in range(10):
+    for i in range(nr_of_variables):
         if nr_of_variables > i + 1:
             ax = ax1.twinx()
             ax.spines["right"].set_position(("outward", offset * i))
             axes.append(ax)
 
     # Grid
-    ax1.grid(which='minor', linestyle=':', alpha=0.2)
-    ax1.grid(which='major', linestyle='--', alpha=0.5)
+    apply_ews_plot_style(ax1, grid=True)
 
     # X axis label (uses only 1 for the whole plot)
-    ax1.set_xlabel("time (weeks)")
+    ax1.set_xlabel("time (weeks, window end)")
 
     # Linestyles
     linestyles = [
@@ -424,9 +512,10 @@ def plot_maker(variables_input, signals, path='/1/', legend=False, save=False, s
     ]
 
     # Colours list
-    colours_list = [plt.cm.tab10(i) for i in np.linspace(0, 1, 9)]
+    colours_list = cfg.EWS_colour_cycle
 
     for i in np.arange(nr_of_variables):
+        plot = None
         ax = axes[i]
         variable = variables_input[i]
         signal = signals[i]
@@ -436,86 +525,84 @@ def plot_maker(variables_input, signals, path='/1/', legend=False, save=False, s
         ax.set_prop_cycle(cycler(color=colours, linestyle=linestyles))
 
         # Dimension and x axis
+        dim = None
         if variable.spatial:
             dim = '.s.'
-            start = cfg.interval_map_snapshots
-            step = start
         elif variable.temporal:
             dim = '.t.'
-            start = variable.window_size
-            step = variable.window_size - variable.window_overlap
 
-        if cfg.cutoff:
-            x_axis = np.arange(start, cfg.cutoff_point + 1, step)
-        else:
-            x_axis = np.arange(start, number_of_timesteps + 1, step)
+        x_axis = ews_time_axis(variable, number_of_timesteps)
 
         # Signal
         if signal == "timeseries":
             fname = ews.file_name_str(variable.name, number_of_timesteps)
-            fpath = os.path.join(path + fname)
+            fpath = os.path.join(path, fname)
             timeseries_y_axis = np.loadtxt(fpath + '.numpy.txt')
             timeseries_x_axis = np.arange(0, number_of_timesteps, 1)
-            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, label=f"{variable.full_name} {ews_temporal_signals[signal]}")
+            label = signal_label(variable, signal)
+            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, linewidth=cfg.EWS_linewidth, label=f"{variable.full_name} {label}")
 
             if timeseries_y_axis.ndim > 1:
                 lines = ax.get_lines()
-                ax.set_ylabel(f"{variable.full_name} {ews_temporal_signals[signal]} ({variable.unit})", color=plot[0].get_color())
+                ax.set_ylabel(f"{variable.full_name} {label} ({variable.unit})", color=plot[0].get_color())
                 for loc, line in enumerate(lines):
-                    line.set_label(f"{variable.full_name} {loc + 1} - {ews_temporal_signals[signal]}")
+                    line.set_label(f"{variable.full_name} {loc + 1} - {label}")
             else:
-                ax.set_ylabel(f"{variable.full_name} {ews_temporal_signals[signal]} ({variable.unit})", color=plot[0].get_color())
+                ax.set_ylabel(f"{variable.full_name} {label} ({variable.unit})", color=plot[0].get_color())
 
         elif signal == "gauss":
             fname = ews.file_name_str(variable.name + 'g', number_of_timesteps)
-            fpath = os.path.join(path + fname)
+            fpath = os.path.join(path, fname)
             timeseries_y_axis = np.loadtxt(fpath + '.numpy.txt')
             timeseries_x_axis = np.arange(0, number_of_timesteps, 1)
-            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, label=f"{variable.full_name} Gaussian filter")
+            label = signal_label(variable, signal)
+            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, linewidth=cfg.EWS_linewidth, label=f"{variable.full_name} {label}")
 
             if timeseries_y_axis.ndim > 1:
                 lines = ax.get_lines()
-                ax.set_ylabel(f"{variable.full_name} {ews_temporal_signals[signal]}", color=plot[0].get_color())
+                ax.set_ylabel(f"{variable.full_name} {label}", color=plot[0].get_color())
                 for loc, line in enumerate(lines):
-                    line.set_label(f"{variable.full_name} {loc + 1} - {ews_temporal_signals[signal]}")
+                    line.set_label(f"{variable.full_name} {loc + 1} - {label}")
             else:
-                ax.set_ylabel(f"{variable.full_name} {ews_temporal_signals[signal]}", color=plot[0].get_color())
+                ax.set_ylabel(f"{variable.full_name} {label}", color=plot[0].get_color())
 
-        elif signal == "linear":
+        elif signal == "meanlinear":
             fname = ews.file_name_str(variable.name + 'l', number_of_timesteps)
-            fpath = os.path.join(path + fname)
+            fpath = os.path.join(path, fname)
             timeseries_y_axis = np.loadtxt(fpath + '.numpy.txt')
             timeseries_x_axis = np.arange(0, number_of_timesteps, 1)
-            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, label=f"{variable.full_name} linear detrending")
+            label = signal_label(variable, signal)
+            plot = ax.plot(timeseries_x_axis, timeseries_y_axis, linewidth=cfg.EWS_linewidth, label=f"{variable.full_name} {label}")
 
             if timeseries_y_axis.ndim > 1:
                 lines = ax.get_lines()
-                ax.set_ylabel(f"{variable.full_name} {ews_temporal_signals[signal]}", color=plot[0].get_color())
+                ax.set_ylabel(f"{variable.full_name} {label}", color=plot[0].get_color())
                 for loc, line in enumerate(lines):
-                    line.set_label(f"{variable.full_name} {loc + 1} - {ews_temporal_signals[signal]}")
+                    line.set_label(f"{variable.full_name} {loc + 1} - {label}")
             else:
-                ax.set_ylabel(f"{variable.full_name} {ews_temporal_signals[signal]}", color=plot[0].get_color())
+                ax.set_ylabel(f"{variable.full_name} {label}", color=plot[0].get_color())
 
         elif signal != 'None':
             fpath = os.path.join(path + variable.name + dim + signal)
             signal_array = np.loadtxt(fpath + '.numpy.txt')
+            label = signal_label(variable, signal)
             if signal_array.ndim > 1 and variable.temporal:
                 signal_array = signal_array.T
                 plot = ax.plot(x_axis, signal_array)
                 lines = ax.get_lines()
-                ax.set_ylabel(f"{ews_temporal_signals[signal]}", color=plot[0].get_color())
+                ax.set_ylabel(label, color=plot[0].get_color())
                 for loc, line in enumerate(lines):
-                    line.set_label(f"{variable.full_name} {loc + 1} - {ews_temporal_signals[signal]}")
+                    line.set_label(f"{variable.full_name} {loc + 1} - {label}")
             elif variable.spatial:
-                plot = ax.plot(x_axis, signal_array, label=f"{variable.full_name} {ews_spatial_signals[signal]}")
-                ax.set_ylabel(f"{ews_spatial_signals[signal]}", color=plot[0].get_color())
+                plot = ax.plot(x_axis, signal_array, label=f"{variable.full_name} {label}")
+                ax.set_ylabel(label, color=plot[0].get_color())
             elif variable.temporal:
-                plot = ax.plot(x_axis, signal_array, label=f"{variable.full_name} {ews_temporal_signals[signal]}")
-                ax.set_ylabel(f"{ews_temporal_signals[signal]}", color=plot[0].get_color())
+                plot = ax.plot(x_axis, signal_array, label=f"{variable.full_name} {label}")
+                ax.set_ylabel(label, color=plot[0].get_color())
 
         # Ticks & spines
-        ax.minorticks_on()
-        ax.tick_params(axis='y', which='both', color=colours[0])
+        apply_ews_plot_style(ax, grid=False)
+        ax.tick_params(axis='y', which='both', colors=colours[0])
         plt.setp(ax.get_yticklabels(), color=colours[0])
 
         for p in plot:
@@ -524,20 +611,22 @@ def plot_maker(variables_input, signals, path='/1/', legend=False, save=False, s
     # Legend
     if legend:
         labs = [p.get_label() for p in plots]
-        ax1.legend(plots, labs)
+        ax1.legend(plots, labs, loc='upper right', frameon=False, fontsize=9)
 
     # Saving file
-    fig.tight_layout()
     if save:
-        format = "pdf"  # either "pdf" or "png"
+        formats = ["svg", "pdf"]
         timestamp = datetime.now()
 
-        if nr_of_variables > 1:
-            fig.savefig(path + f"{variables_input[0].name}_{signals[0]}_{signals[1]}_with_{nr_of_variables}_variables_"
-                               f"{timestamp.hour}.{timestamp.minute}.{timestamp.second}.{format}", dpi=300, format=format)
-        else:
-            fig.savefig(path + f"{variables_input[0].name}_{signals[0]}_{timestamp.hour}.{timestamp.minute}."
-                               f"{timestamp.second}.{format}", dpi=300, format=format)
+        fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
+
+        for fmt in formats:
+            if nr_of_variables > 1:
+                fig.savefig(path + f"{variables_input[0].name}_{signals[0]}_{signals[1]}_with_{nr_of_variables}_variables_"
+                                   f"{timestamp.hour}.{timestamp.minute}.{timestamp.second}.{fmt}", dpi=300, format=fmt)
+            else:
+                fig.savefig(path + f"{variables_input[0].name}_{signals[0]}_{timestamp.hour}.{timestamp.minute}."
+                                   f"{timestamp.second}.{fmt}", dpi=300, format=fmt)
 
     # Showing plot
     if show:
@@ -584,7 +673,11 @@ def user_input_plotmaker(path='./1/'):
 
         print(f"Enter the short name for state variable {nr_of_variables}")
         variable_input = input()
-        variable_name = [var for var in variables if var.name == variable_input][0]
+        matches = [var for var in variables if var.name == variable_input]
+        if not matches:
+            raise ValueError(f"Unknown variable '{variable_input}'")
+        variable_name = matches[0]
+
         variables_list.append(variable_name)
 
         if variable_name.temporal:
@@ -612,7 +705,7 @@ def user_input_plotmaker(path='./1/'):
     else:
         legend = False
 
-    print("Save the plot as a .pdf? [Y/n]")
+    print("Save the plot as a .pdf & .svg? [Y/n]")
     save_plot = input()
     if save_plot == 'Y' or save_plot == 'y':
         save = True
@@ -659,4 +752,5 @@ def user_input_plotmaker_looper(path='./1/'):
         print("Invalid input, terminated plotmaker. Goodbye.")
 
 
-user_input_plotmaker_looper()
+if __name__ == "__main__":
+    user_input_plotmaker_looper()

@@ -8,13 +8,9 @@ EWS Python functions (EWSPy)
 import numpy as np
 
 import scipy.stats
-from scipy import fft
 from scipy.signal import convolve
-
-from statsmodels.api import OLS
+from statsmodels.api import OLS, add_constant
 from statsmodels.tsa.ar_model import AutoReg
-
-import warnings
 
 import sys
 sys.path.append("./pcrasterModules/")
@@ -119,7 +115,6 @@ Returns:
 
 
 def spatial_mean(numpy_matrix):
-    # return np.array([np.nanmean(array) for array in numpy_matrix])
     return np.nanmean(numpy_matrix, axis=(1, 2))
 
 
@@ -168,6 +163,7 @@ def spatial_var(numpy_matrix):
 # Spatial skewness
 """
 Calculates the skewness of 2D numpy arrays as found inside a 3D numpy array.
+NOTE: skewness and kurtosis are sensitive to missing spatial coverage
 
 Args:
 -----
@@ -183,12 +179,15 @@ Returns:
 
 
 def spatial_skw(numpy_matrix):
-    return [scipy.stats.skew(np.nditer(array), nan_policy='omit') for array in numpy_matrix]
+    return np.asarray([
+        scipy.stats.skew(array.flatten(), nan_policy='omit') for array in numpy_matrix
+    ])
 
 
 # Spatial kurtosis
 """
 Calculates the kurtosis of 2D numpy arrays as found inside a 3D numpy array.
+NOTE: skewness and kurtosis are sensitive to missing spatial coverage
 
 Args:
 -----
@@ -204,12 +203,16 @@ Returns:
 
 
 def spatial_krt(numpy_matrix):
-    return [scipy.stats.kurtosis(np.nditer(array), nan_policy='omit') for array in numpy_matrix]
+    return np.asarray([
+        scipy.stats.kurtosis(array.flatten(), nan_policy='omit') for array in numpy_matrix
+    ])
 
 
 # Spatial correlation (Moran's I)
 """
 Calculates the spatial correlation of 2D numpy arrays as found inside a 3D numpy array.
+(Normalized Moran's I adapted for masked grids with variable neighbour counts)
+! Note: Assumes regular grid with equal cell spacing (both are true for PCRaster grids).
 
         N   sum_i( sum_j( w_i,j ( x_i - x_m ) ( x_j - x_m )
     I = - * -----------------------------------------------
@@ -231,6 +234,8 @@ Args:
 
 numpy_matrix : A 3D numpy array representing the temporal evolution of spatial (2D) data.
 
+local : Boolean, True uses row-standardized spatial weights, yielding a Moran's I that behaves like a spatial AR(1) coeff.
+
 Returns:
 -----
 
@@ -244,19 +249,20 @@ rook_neighborhood = np.array([
     [0, 1, 0]
 ])
 
-queen_neighborhood = np.array([
-    [1, 1, 1],
+rook_neighborhood_local = np.array([
+    [0, 1, 0],
     [1, 0, 1],
-    [1, 1, 1]
-])
+    [0, 1, 0]
+], dtype=float)
+rook_neighborhood_local /= np.sum(rook_neighborhood_local)
 
 
-def spatial_corr(numpy_matrix):  # Moran's I
+def spatial_corr(numpy_matrix, local=False):  # Moran's I
+    numpy_matrix = np.asarray(numpy_matrix)
+    assert numpy_matrix.ndim == 3, "Expected array of shape (time, x, y)"
+
     mean = spatial_mean(numpy_matrix)
-    mean = np.nan_to_num(mean, nan=0)
-
-    var = spatial_var(numpy_matrix)
-    var = np.nan_to_num(var, nan=0)
+    mean = np.nan_to_num(mean, nan=0.0)
 
     numpy_matrix_mmean = np.copy(numpy_matrix)
     numpy_matrix_mmean -= mean[:, None, None]
@@ -265,46 +271,149 @@ def spatial_corr(numpy_matrix):  # Moran's I
     is_not_nan = ~ is_nan
     is_not_nan_as_nr = is_not_nan.astype(float)
 
-    numpy_matrix_var = np.copy(is_not_nan_as_nr)
-    numpy_matrix_var *= var[:, None, None]
+    numpy_matrix_var = numpy_matrix_mmean ** 2
+    numpy_matrix_var[is_nan] = 0.0
 
     numpy_matrix_copy = np.copy(numpy_matrix)
-    numpy_matrix_copy[is_nan] = 0
+    numpy_matrix_copy[is_nan] = 0.0
 
-    sum_neighbours = convolve(numpy_matrix_copy, rook_neighborhood[None, :, :], mode='same')
+    if local is True:
+        neighborhood = rook_neighborhood_local
+    else:
+        neighborhood = rook_neighborhood
 
-    n_neighbours = convolve(is_not_nan_as_nr, rook_neighborhood[None, :, :], mode='same')
-    n_neighbours_times_avg = convolve(is_not_nan_as_nr * mean[:, None, None], rook_neighborhood[None, :, :], mode='same')
-    n_neighbours_times_avg[is_nan] = 0
+    sum_neighbours = convolve(numpy_matrix_copy, neighborhood[None, :, :], mode='same')
+
+    n_neighbours = convolve(is_not_nan_as_nr, neighborhood[None, :, :], mode='same')
+    n_neighbours_times_avg = convolve(is_not_nan_as_nr * mean[:, None, None], neighborhood[None, :, :], mode='same')
+    n_neighbours_times_avg[is_nan] = 0.0
 
     P1 = np.nansum(numpy_matrix_mmean * (sum_neighbours - n_neighbours_times_avg), axis=(1, 2))
     P2 = np.nansum(n_neighbours * numpy_matrix_var, axis=(1, 2))
-    return P1 / P2
+
+    N = np.nansum(is_not_nan_as_nr, axis=(1, 2))
+    W = np.nansum(n_neighbours, axis=(1, 2))
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        I = (N / W) * (P1 / P2)
+
+    return np.nan_to_num(I, nan=0.0)
 
 
-# def spatial_DFT(numpy_matrix):
-#     return fft.fft2(numpy_matrix, axes=(-2,))
-#
-#
-# def spatial_power_spec(numpy_matrix): # Only works for square matrices! Power spectrum as function of wave number (P(k))
-#     n = numpy_matrix.shape[0]
-#
-#     fourier_image = fft.fft2(numpy_matrix) # fourier 'image'
-#     fourier_amplitudes = np.abs(fourier_image) ** 2 # fourier amplitudes
-#
-#     kfreq = fft.fftfreq(n) * n # 1D array containing the wave vectors in k space
-#     kfreq2D = np.meshgrid(kfreq, kfreq) # convertion to 2D array matching the layout of the fourier 'image'
-#     knorm = np.sqrt(kfreq2D[0]**2 + kfreq2D[1]**2) # norm of wave vectors
-#     knorm = knorm.flatten()
-#     fourier_amplitudes = fourier_amplitudes.flatten()
-#
-#     kbins = np.arange(0.5, n//2 + 1, 1.) # start & end points of all bins
-#     kvals = 0.5 * (kbins[1:] + kbins[:-1]) # corresponding k values
-#
-#     Abins, _, _ = scipy.stats.binned_statistic(knorm, fourier_amplitudes, statistic = "mean", bins = kbins) # average Fourier amplitude (**2) in each bin
-#     Abins *= np.pi * (kbins[1:]**2 - kbins[:-1]**2) # total power --> multiply by area in each bin (eq5)
-#
-#     return fourier_image, kvals, Abins
+# Spatial DFT
+"""
+Spatial spectral EWS based on 2D DFT.
+-> As a system approaches a tipping point, spatial patterns become smoother and dominated by large-scale structure;
+    Large-scale structure = low spatial frequencies
+-> Hence the question; What fraction of spatial variance is contained in low frequencies?
+
+Args:
+-----
+
+numpy_matrix : ndarray (T, X, Y)
+    Time series of spatial snapshots.
+low_freq_frac : float
+    Fraction of lowest spatial frequencies used to compute low-frequency power.
+
+Returns:
+-----
+
+dft_signal : ndarray (T,)
+    Fraction of spectral power contained in low spatial frequencies.
+
+"""
+
+
+def spatial_DFT(numpy_matrix, low_freq_frac=0.1):
+    numpy_matrix = np.asarray(numpy_matrix)
+    T = numpy_matrix.shape[0]
+    dft_signal = np.full(T, np.nan)
+
+    for t in range(T):
+        field = numpy_matrix[t]
+
+        if np.isnan(field).any():
+            # Skip invalid snapshots as FFTs do not handle NaNs
+            continue
+
+        F = np.fft.fft2(field)  # converts space to spatial frequency, patterns to wavelengths
+        P = np.abs(F) ** 2      # Complex output -> power is proportional to variance at each frequency
+        P = np.fft.fftshift(P)  # Centers low frequencies
+
+        nx, ny = P.shape
+        cx, cy = nx // 2, ny // 2
+        r = int(low_freq_frac * min(nx, ny))    # creates central square round zero frequency;
+                                                #   small r -> very large spatial scales
+                                                #   large r -> finer patterns
+
+        low_freq_power = np.sum(P[cx - r:cx + r + 1, cy - r:cy + r + 1])
+        total_power = np.sum(P)
+
+        if total_power > 0:
+            dft_signal[t] = low_freq_power / total_power    # normalization, EWS(t) = sum low k P(K) / sum all k P(k)
+                                                            # at tipping points; low-freq goes up, ratio goes up, spatial "reddening"
+
+    return dft_signal
+
+
+# spatial power spec
+"""
+Spatial power spectrum based early-warning signal.
+
+Computes the slope of the radially averaged power spectrum for each spatial snapshot.
+-> How does variance distribute across spatial scales?
+    Compared to /how much/ low-freq power there is, we now ask; How fast does power decay with wavelength?
+
+Args:
+-----
+numpy_matrix : ndarray (T, X, Y)
+
+Returns:
+-----
+ps_signal : ndarray (T,)
+    Spectral slope of spatial power spectrum.
+ """
+
+
+def spatial_power_spec(numpy_matrix):
+    numpy_matrix = np.asarray(numpy_matrix)
+    T = numpy_matrix.shape[0]
+    ps_signal = np.full(T, np.nan)
+
+    for t in range(T):
+        field = numpy_matrix[t]
+
+        if np.isnan(field).any():
+            # Skip invalid snapshots as FFTs do not handle NaNs
+            continue
+
+        F = np.fft.fft2(field)  # Converts space to spatial frequency, patterns to wavelengths
+        P = np.abs(F) ** 2      # Complex output -> power is proportional to variance at each frequency
+        P = np.fft.fftshift(P)  # Centerslow frequencies
+
+        nx, ny = P.shape
+        x = np.arange(-nx // 2, nx // 2)
+        y = np.arange(-ny // 2, ny // 2)
+        X, Y = np.meshgrid(x, y, indexing='ij')
+        R = np.sqrt(X**2 + Y**2)    # Defines radial spatial frequency
+                                    #   Small R -> large-scale patterns
+                                    #   Large R -> fine grained noise
+
+        r = R.astype(int)
+        tbin = np.bincount(r.ravel(), P.ravel())
+        nr = np.bincount(r.ravel())
+
+        radial_power = tbin / np.maximum(nr, 1)
+
+        k = np.arange(len(radial_power))
+        valid = (radial_power > 0) & (k > 0)    # radial_power(r) = mean power of all pixels at radius r
+                                                # Collapses 2D -> 1D; we now have Power vs spatial scale
+        if np.sum(valid) > 2:
+            coeffs = np.polyfit(np.log(k[valid]), np.log(radial_power[valid]), 1)   # log-log regression where we estimate k^a which is proportional to P(k) (a being the spectral slope)
+            slope = coeffs[0]                                                       # flatter slope -> more large-scale dominance
+            ps_signal[t] = slope
+
+    return ps_signal
 
 
 # Temporal early-warning signals
@@ -331,6 +440,8 @@ Rising variability & flickering :
 # Temporal AR(1)
 """
 Calculates the AR(1) parameters of a 1D array (window) inside a 2D array (stack of windows).
+Assumes stationarity and zero-mean innovations.
+! Note: Assumes weak stationarity within each window.
 
 Args:
 -----
@@ -347,6 +458,8 @@ AR1_params : Returns a 1D array containing the AR(1) parameter for each window c
 
 
 def temporal_AR1(stack_of_windows):
+    assert stack_of_windows.ndim == 2, "Expected array of shape (windows, time)"
+
     mean = temporal_mean(stack_of_windows)
     mean = np.nan_to_num(mean, nan=0.0)
 
@@ -354,10 +467,15 @@ def temporal_AR1(stack_of_windows):
     stack_of_windows_mmean -= mean[:, None]
 
     AR1_params = []
+
     for numpy_array in stack_of_windows_mmean:
-        mod = AutoReg(numpy_array, 1, trend='n').fit()
-        AR1_params = np.append(AR1_params, mod.params)
-    return AR1_params
+        try:
+            mod = AutoReg(numpy_array, 1, trend='n').fit()
+            AR1_params.append(mod.params[0])
+        except:
+            AR1_params.append(np.nan)
+
+    return np.asarray(AR1_params)
 
 
 # Temporal return rate
@@ -379,13 +497,21 @@ Returns:
 
 
 def temporal_returnrate(stack_of_windows):
-    return np.reciprocal(temporal_AR1(stack_of_windows))
+    assert stack_of_windows.ndim == 2, "Expected array of shape (windows, time)"
+
+    ar1 = temporal_AR1(stack_of_windows)
+    return np.divide(1.0, ar1, out=np.full_like(ar1, np.nan, dtype=float), where=ar1 != 0)
 
 
 # Temporal conditional heteroskedasticity
 """
 Returns the F-value or the R-squared value with their associated p-value of the residuals of an AutoReg model fitted on
-    a 1D array (window) inside a 2D array (stack of windows).
+    a 1D array (window) inside a 2D array (stack of windows). McLeod-Li-style test.
+    
+    ! Note that the returned p-value corresponds to a X^2-based critical value, rather than an exact p-value.
+    
+    McLeod–Li-style test for conditional heteroskedasticity; Detects temporal dependence in variance after removing linear autocorrelation.
+    ! Used as a trend-based early warning signal, not a formal hypothesis test.
 
 Args:
 -----
@@ -409,6 +535,8 @@ p_val : The p-value accompanying the test_statistic
 
 
 def temporal_cond_het(stack_of_windows, method='R-squared', alpha=0.1, log_transform=False):
+    assert stack_of_windows.ndim == 2, "Expected array of shape (windows, time)"
+
     if log_transform:
         stack_of_windows = np.log10(stack_of_windows)
 
@@ -421,27 +549,41 @@ def temporal_cond_het(stack_of_windows, method='R-squared', alpha=0.1, log_trans
     p_val = []
     for k, numpy_array in enumerate(stack_of_windows_mmean):
         ar_model = AutoReg(numpy_array, 1, trend='n').fit()
+        # At runtime, type(ar_model.resid) == np.ndarray, so:
+        # noinspection PyTypeChecker
         ar_resid_sq = ar_model.resid**2
-        lin_model = OLS(ar_resid_sq[1:], ar_resid_sq[:len(ar_resid_sq)-1]).fit()  # t+1 is dependent on t
+
+        if np.nanvar(ar_resid_sq) == 0:
+            test_statistic = np.append(test_statistic, np.nan)
+            p_val = np.append(p_val, np.nan)
+            continue
+
+        X = add_constant(ar_resid_sq[:-1])
+        lin_model = OLS(ar_resid_sq[1:], X).fit()  # t+1 is dependent on t
         # If significant (p-value lower than given value), heteroscedasticity is present.
+        # At runtime, lin_model.fvalue & lin_model.pvalue are treated as floats, hence the noinspection PyTypeChecker.
         if method == 'F-statistic':
+            # noinspection PyTypeChecker
             test_statistic = np.append(test_statistic, lin_model.fvalue)
+            # noinspection PyTypeChecker
             p_val = np.append(p_val, lin_model.f_pvalue)
         elif method == 'R-squared':
+            # noinspection PyTypeChecker
             test_statistic = np.append(test_statistic, lin_model.rsquared)
             p_val = np.append(p_val, scipy.stats.chi2.ppf((1 - alpha), df=1) / (len(ar_resid_sq)-1))
-    return test_statistic, p_val
+    return np.asarray(test_statistic), np.asarray(p_val)
 
 
 # Temporal autocorrelation
 """
 Calculates the autocorrelation (correlation of a signal with a delayed copy of itself) at a specified lag of a 1D array 
     (window) inside a 2D array (stack of windows). 
+    Note: Uses biased autocovariance estimator; normalization cancels in autocorrelation.
 
 Args:
 -----
 
-stack_of_windows : A 2D numpy array containing a sliced timeseries (stack of windows).
+numpy_array : A 2D numpy array containing a sliced timeseries (stack of windows).
 
 lag : Time lag, order. Usually set to 1
 
@@ -455,13 +597,19 @@ Returns:
 
 
 def temporal_autocorrelation(numpy_array, lag=1):
-    return np.true_divide(temporal_autocovariance(numpy_array, lag=lag), temporal_var(numpy_array))
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
+
+    cov = temporal_autocovariance(numpy_array, lag=lag)
+    var = temporal_var(numpy_array)
+
+    return np.divide(cov, var, out=np.full_like(var, np.nan, dtype=float), where=var != 0)
 
 
 # Temporal autocovariance
 """
-Calculates the autocovariance (the covariance3 of the process with itself at pairs of time points) of a 1D array 
+Calculates the autocovariance (the covariance of the process with itself at pairs of time points) of a 1D array 
     (window) inside a 2D array (stack of windows).
+    Note: biased estimator 1/N, sufficient for trend-based EWS analysis.
 
 Args:
 -----
@@ -479,19 +627,23 @@ Returns:
 
 
 def temporal_autocovariance(numpy_array, lag=1):
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
+
     auto_cov = [0.0] * len(numpy_array)
     for k, window in enumerate(numpy_array):
-        N = len(window)
         mean = np.nanmean(window)
-        mean = np.nan_to_num(mean, nan=0.0)
+        centered = window - mean
 
-        end_padded_series = np.zeros(N+lag)
-        end_padded_series[:N] = window - mean
-        start_padded_series = np.zeros(N+lag)
-        start_padded_series[lag:] = window - mean
+        x = centered[:-lag]
+        y = centered[lag:]
 
-        auto_cov[k] = np.sum(start_padded_series * end_padded_series) / N
-    return auto_cov
+        mask = ~np.isnan(x) & ~np.isnan(y)
+
+        if np.sum(mask) == 0:
+            auto_cov[k] = np.nan
+        else:
+            auto_cov[k] = np.sum(x[mask] * y[mask]) / np.sum(mask)
+    return np.asarray(auto_cov)
 
 
 # Temporal mean
@@ -512,6 +664,7 @@ Returns:
 
 
 def temporal_mean(numpy_array):
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
     return np.nanmean(numpy_array, axis=1)
 
 
@@ -533,6 +686,7 @@ Returns:
 
 
 def temporal_std(numpy_array):
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
     return np.nanstd(numpy_array, axis=1)
 
 
@@ -554,6 +708,7 @@ Returns:
 
 
 def temporal_var(numpy_array):
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
     return np.nanvar(numpy_array, axis=1)
 
 
@@ -576,7 +731,12 @@ Returns:
 
 
 def temporal_cv(numpy_array):
-    return np.true_divide(temporal_std(numpy_array), temporal_mean(numpy_array))
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
+
+    mean = temporal_mean(numpy_array)
+    std = temporal_std(numpy_array)
+
+    return np.divide(std, mean, out=np.full_like(mean, np.nan, dtype=float), where=mean != 0)
 
 
 # Temporal skewness
@@ -597,6 +757,7 @@ Returns:
 
 
 def temporal_skw(numpy_array):
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
     return scipy.stats.skew(numpy_array, axis=1, nan_policy='omit')
 
 
@@ -618,6 +779,7 @@ Returns:
 
 
 def temporal_krt(numpy_array):
+    assert numpy_array.ndim == 2, "Expected array of shape (windows, time)"
     return scipy.stats.kurtosis(numpy_array, axis=1, nan_policy='omit')
 
 
@@ -676,8 +838,8 @@ rms : A 1D numpy array with the quadratic mean for each scale (segment) of a giv
 
 def calc_rms(numpy_array, scale):
     # Making of an array with data divided into segments
-    shape = (numpy_array.shape[0] // scale, scale)
-    segments = np.array([numpy_array[i:i + scale] for i in range(0, len(numpy_array), scale)]).reshape(shape)
+    n = len(numpy_array) // scale
+    segments = numpy_array[:n*scale].reshape(n, scale)
 
     # Vector of x-axis
     scale_ax = np.arange(scale)
@@ -721,6 +883,7 @@ def dfa_propagator(alpha, c_guess=0.5):
 
     x1 = c_guess
     count = 0
+    a = b = c = d = np.nan  # if x1 is NaN, none of the branches would execute, leaving a - d undefined.
     while count < 5:
 
         # if 0 < x1 <= 0.936:
@@ -746,7 +909,12 @@ def dfa_propagator(alpha, c_guess=0.5):
         # Constructs the polynomial a*x**3 + b*x**2 + c*x + d
         poly = np.poly1d([a, b, c, d])
         roots = np.roots(poly)
-        x1 = roots[-1].real
+        real_roots = roots[np.isreal(roots)].real
+
+        if len(real_roots) == 0:
+            return np.nan
+
+        x1 = real_roots[np.argmin(np.abs(real_roots - x1))]
 
         count += 1
 
@@ -778,9 +946,12 @@ propagator : If not return_propagater; equal to coeff. Otherwise, dfa_propagator
 """
 
 
-def temporal_dfa(stack_of_windows, window_size=100, return_propagator=False):
+def temporal_dfa(stack_of_windows, return_propagator=False, return_all=False):
+    assert stack_of_windows.ndim == 2, "Expected array of shape (windows, time)"
+
     fluct = []
     coeff = []
+    window_size = stack_of_windows.shape[1]
     scales = divisor_generator(10, window_size)
     propagator = []
 
@@ -793,21 +964,24 @@ def temporal_dfa(stack_of_windows, window_size=100, return_propagator=False):
         for i, sc in enumerate(scales):
             fluctuations[i] = np.sqrt(np.mean(calc_rms(y, sc)**2))
 
-        coefficients = np.polyfit(np.log2(scales), np.log2(fluctuations), 1)
+        valid = (fluctuations > 0) & np.isfinite(fluctuations)
+
+        if np.sum(valid) > 2:
+            coefficients = np.polyfit(np.log2(scales[valid]), np.log2(fluctuations[valid]), 1)
+        else:
+            coefficients = [np.nan, np.nan]
+
+        fluct.append(fluctuations)
+        coeff.append(coefficients[0])
 
         if return_propagator:
-            propagator = np.append(propagator, dfa_propagator(coefficients[0]))
+            propagator.append(dfa_propagator(coefficients[0]))
 
-        fluct = np.append(fluct, fluctuations)
-        coeff = np.append(coeff, coefficients[0])
+    fluct = np.array(fluct)
+    coeff = np.array(coeff)
+    propagator = np.array(propagator) if return_propagator else coeff
 
-    fluct = np.array_split(fluct, len(scales))
-
-    if not return_propagator:
-        propagator = coeff
-
-    return scales, fluct, coeff, propagator
-
-
-warnings.simplefilter('ignore', np.RankWarning)
-# Ignore np.RankWarning (== the rank of the coefficient matrix in the least-squares fit is deficient)
+    if return_all:
+        return scales, fluct, coeff, propagator
+    if return_all is False:
+        return propagator

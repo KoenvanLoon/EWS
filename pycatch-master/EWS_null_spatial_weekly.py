@@ -2,27 +2,27 @@
 EWS - Early Warning Signals
 Null models spatial weekly
 
-@authors: KoenvanLoon & TijmenJanssen
+@authors: KoenvanLoon
 """
 
 import numpy as np
 from scipy import fft
-from scipy.signal import convolve
 from scipy import ndimage
+from scipy.sparse import coo_matrix, identity
+from scipy.sparse.linalg import spsolve
 import os
 import EWSPy as ews
 import EWS_configuration as cfg
 from pcraster import numpy2pcr, report, Scalar
 
-
 ### Null models adapted from (Dakos et al. 2008) ###
-
-# TODO - method 2 did not always return the right mean --> check solution -, check method 3
 
 # Detrend dataset
 """
-Detrends the given dataset making use of either Gaussian filtering or linear detrending, as specified in the 
+Detrends the given dataset making use of either Gaussian filtering or mean-centred detrending, as specified in the 
 configuration. Optionally, this data is saved.
+
+!NOTE: Spatial trends are considered nuisance structure rather than part of the EWS.
 
 Args:
 -----
@@ -44,22 +44,25 @@ detrended_data : The detrended spatial datasets.
 
 
 def detrend_(dataset, realizations=1, path='./1/', variable='xxx'):
-    generated_number_length = ews.generated_number_length(realizations)
+    dataset = np.asarray(dataset)
+    assert dataset.ndim == 3, "Spatial null models require 3D arrays of shape (time, y, x)"
 
+    generated_number_length = ews.generated_number_length(realizations)
     steps = np.arange(cfg.interval_map_snapshots, cfg.number_of_timesteps_weekly + cfg.interval_map_snapshots,
                       cfg.interval_map_snapshots)
 
     detrended_dataset = [0.0] * len(dataset)
 
     for k, data in enumerate(dataset):
-        detrended_data = data
+        assert data.ndim == 2, "Each spatial snapshot must be 2D"
+        detrended_data = data.copy()
         if cfg.detrended_method == 'Gaussian':
             gaussian_filter = ndimage.gaussian_filter(data, cfg.detrended_sigma)
             detrended_data -= gaussian_filter
-        elif cfg.detrended_method == 'Linear':
+        elif cfg.detrended_method == 'MeanLinear':
             mean = np.nanmean(data)
             detrended_data -= mean
-        elif cfg.detrended_method is not 'None':
+        elif cfg.detrended_method != 'None':
             print("Invalid input for detrending_spat in generate_datasets (EWS_weekly.py). No detrending done.")
 
         detrended_dataset[k] = detrended_data
@@ -73,14 +76,13 @@ def detrend_(dataset, realizations=1, path='./1/', variable='xxx'):
 
             fname1 = ews.file_name_str(variable.name, steps[k])
             fpath1 = os.path.join(dir_name, fname1)
-            # np.savetxt(fpath1 + '.numpy.txt', detrended_data)
             detrended_data_pcr = numpy2pcr(Scalar, detrended_data, np.NaN)
             report(detrended_data_pcr, fpath1)
 
+            gaussian_filter = None
             if cfg.detrended_method == 'Gaussian':
                 fname2 = ews.file_name_str(variable.name + 'g', steps[k])
                 fpath2 = os.path.join(dir_name, fname2)
-                # np.savetxt(fpath2 + '.numpy.txt', gaussian_filter)
                 gaussian_filter_pcr = numpy2pcr(Scalar, gaussian_filter, np.NaN)
                 report(gaussian_filter_pcr, fpath2)
 
@@ -131,7 +133,6 @@ def method1_(dataset, realizations=1, path='./1/', variable='xxx', replace=False
 
             fname = ews.file_name_str(variable.name, steps[k])
             fpath = os.path.join(dir_name, fname)
-            # np.savetxt(fpath + '.numpy.txt', generated_dataset)
             report(generated_dataset, fpath)
 
 
@@ -148,8 +149,8 @@ data : numpy array, the spatial datasets.
 realizations : int, the number of datasets generated.
 
 method : str, either 'None' or 'Detrending', if detrended data is used as input, no further detrending is needed. If
-    not-detrended data is used, linear detrending is applied before the Fourier spectrum and amplitudes are calculated,
-    with the linear detrend added after the generation of datasets. 
+    not-detrended data is used, mean-centred detrending is applied before the Fourier spectrum and amplitudes are calculated,
+    with the mean-centred detrend added after the generation of datasets. 
 
 path : str, the filepath where the original dataset can be found.
 
@@ -175,18 +176,17 @@ def method2_(dataset, realizations=1, method='None', path='./1/', variable='xxx'
         fft2_ = fft.fft2(data)
         fft2_mag = np.abs(fft2_)
         fft2_phases = np.angle(fft2_)
-        fft2_phases_shape = fft2_phases.shape
 
-        fft2_phases_new = fft2_phases.copy()
-        fft2_phases_1d = fft2_phases_new.ravel()
         for realization in range(realizations):
-            fft2_phases_new = np.random.choice(fft2_phases_1d, len(fft2_phases_1d), replace=replace).reshape(
-                fft2_phases_shape)
+            fft2_phases_new = np.random.uniform(-np.pi, np.pi, fft2_phases.shape)
+            fft2_phases_new = (fft2_phases_new + np.flipud(np.fliplr(fft2_phases_new))) / 2
 
             fft2_sym = fft2_mag * (np.cos(fft2_phases_new) + 1j * np.sin(fft2_phases_new))
-            generated_dataset_numpy = fft.ifft2(fft2_sym)
+            generated_dataset_numpy = np.real(fft.ifft2(fft2_sym))
 
-            generated_dataset_numpy = np.absolute(generated_dataset_numpy)  # TODO - Check if this is correct
+            mean = 0.0
+            if method == 'Detrending':
+                generated_dataset_numpy += mean
 
             generated_dataset = numpy2pcr(Scalar, generated_dataset_numpy, np.NaN)
 
@@ -198,7 +198,6 @@ def method2_(dataset, realizations=1, method='None', path='./1/', variable='xxx'
 
             fname = ews.file_name_str(variable.name, steps[k])
             fpath = os.path.join(dir_name, fname)
-            # np.savetxt(fpath + '.numpy.txt', generated_dataset)
             report(generated_dataset, fpath)
 
 
@@ -207,6 +206,44 @@ def method2_(dataset, realizations=1, method='None', path='./1/', variable='xxx'
 Combination of Jon Yearsley (2021). Generate AR1 spatial data (https://www.mathworks.com/matlabcentral/fileexchange/5099-generate-ar1-spatial-data), MATLAB Central File Exchange. Retrieved November 30, 2021.
 and Dakos et al. 10.1073/pnas.0802430105
 """
+
+
+# Sparse rook adjecency matrix or: How I Learned to Stop Worrying and Love the Math
+def rook_weight_matrix(ny, nx, rho):
+    rows = []
+    cols = []
+    data = []
+
+    def idx(i, j):
+        return i * nx + j
+
+    for i in range(ny):
+        for j in range(nx):
+            p = idx(i,j)
+
+            if i > 0:       # up
+                rows.append(p)
+                cols.append(idx(i - 1, j))
+                data.append(rho / 4)
+
+            if i < ny - 1:  # down
+                rows.append(p)
+                cols.append(idx(i + 1, j))
+                data.append(rho / 4)
+
+            if j > 0:       # left
+                rows.append(p)
+                cols.append(idx(i, j - 1))
+                data.append(rho / 4)
+
+            if j < nx - 1:  # right
+                rows.append(p)
+                cols.append(idx(i, j + 1))
+                data.append(rho / 4)
+
+    N = ny * nx
+    return coo_matrix((data, (rows, cols)), shape=(N, N)).tocsr()
+
 
 # Generate datasets method 3
 """
@@ -231,42 +268,62 @@ stdev_error : int/float, the standard deviation of the white noise process.
 
 """
 
-def method3_(dataset, realizations=1, method='Normal', path='./1/', variable='xxx', stdev_error=1.0):
-    generated_number_length = ews.generated_number_length(realizations)
 
+def method3_(dataset, realizations=1, method='Normal', path='./1/', variable='xxx'):
+    dataset = np.asarray(dataset)
+    assert dataset.ndim == 3, "Spatial null models require 3D arrays of shape (time, y, x)"
+
+    generated_number_length = ews.generated_number_length(realizations)
     steps = np.arange(cfg.interval_map_snapshots, cfg.number_of_timesteps_weekly + cfg.interval_map_snapshots,
                       cfg.interval_map_snapshots)
 
-    spatial_correlation = ews.spatial_corr(dataset)
+    spatial_correlation = ews.spatial_corr(dataset, local=True)
 
     for k, data in enumerate(dataset):
         Morans_I = spatial_correlation[k]
+
+        if abs(Morans_I) > 0.99:
+            print(f"Warning: strong spatial correlation (I={Morans_I:.3f}) at snapshot {k}")
+
+        # If spsolve ever starts acting up, shut it up with adding the following lines:
+        # eps = 1e-6
+        # if abs(Morans_I) >= 1:
+        #     Morans_I = np.sign(Morans_I) * (1 - eps)
         alpha0_1 = np.nanmean(data) * (1 - Morans_I)
         alpha0_2 = np.nanmean(data)
-        sig2 = np.nanvar(data) * (1 - Morans_I ** 2)
 
         dim = data.shape
-        N = np.prod(dim)
+        ny, nx = dim
+        N = ny * nx
 
-        W = np.zeros((N, N))
-        np.fill_diagonal(W[1:], Morans_I / 4)
-        np.fill_diagonal(W[:, 1:], Morans_I / 4)
-
-        M = np.identity(N) - W
-        inv_M = np.linalg.inv(M)
+        W = rook_weight_matrix(ny, nx, Morans_I)
+        # M = I - W (W already includes Moran's I (rho) scaling.
+        M = identity(N, format="csr") - W
 
         for realization in range(realizations):
-            random_error = np.random.normal(loc=0.0, scale=stdev_error, size=N)
+
+            # Step 1 - generate unit-variance noise
+            random_error = np.random.normal(loc=0.0, scale=1.0, size=N)
+
+            raw = spsolve(M, random_error).reshape(dim)
 
             if method == 'Adjusted':
-                if np.isnan(np.sqrt(sig2)):
-                    generated_dataset_numpy = np.dot(inv_M, random_error * 0.0).reshape(dim) + alpha0_1
-                else:
-                    generated_dataset_numpy = np.dot(inv_M, random_error * np.sqrt(sig2)).reshape(dim) + alpha0_1
+                raw_mean = alpha0_1
             elif method == 'Normal':
-                generated_dataset_numpy = np.dot(inv_M, random_error).reshape(dim) + alpha0_2
+                raw_mean = alpha0_2
+            else:
+                raise ValueError("Unknown method: choose 'Normal' or 'Adjusted'")
 
-            generated_dataset = numpy2pcr(Scalar, generated_dataset_numpy, np.NaN)
+            # Step 2 - variance matching
+            raw_var = np.nanvar(raw)
+            target_var = np.nanvar(data)
+
+            if raw_var > 0:
+                raw *= np.sqrt(target_var / raw_var)
+
+            generated_dataset = raw + raw_mean
+            generated_dataset = numpy2pcr(Scalar, generated_dataset, np.NaN)
+
             generated_number_string = 'm3g' + str(realization).zfill(generated_number_length)
             dir_name = os.path.join(path + generated_number_string)
 
@@ -275,5 +332,4 @@ def method3_(dataset, realizations=1, method='Normal', path='./1/', variable='xx
 
             fname = ews.file_name_str(variable.name, steps[k])
             fpath = os.path.join(dir_name, fname)
-            # np.savetxt(fpath + '.numpy.txt', generated_dataset)
             report(generated_dataset, fpath)

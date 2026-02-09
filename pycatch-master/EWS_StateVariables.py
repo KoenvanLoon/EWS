@@ -26,9 +26,10 @@ spatial : bool, selects whether data is spatial or not.
 
 temporal : bool, selects whether data is temporal or not.
 
-snapshot_interval : int, modelled time between saved spatial data.
+snapshot_interval : int, modelled time between saved spatial (map-based) data.
 
-window_size : int, amount of datapoints over which the early-warning signal is calculated (window).
+window_size : int, amount of datapoints, not physical time units, over which the early-warning signal is calculated (window).
+                Interpretation depends on snapshot_interval and model (hourly/weekly).
 
 window_overlap : int, amount of datapoints from previous window taken into the next window.
 
@@ -49,16 +50,13 @@ Index Fund :
     
 """
 
-# TODO - Expand variables_hourly
-# TODO - Add units
-
 variables_weekly = []
 variables_hourly = []
 
 
 class StateVariable:
-    def __init__(self, name, spatial=False, temporal=False, snapshot_interval=cfg.interval_map_snapshots,
-                 window_size=1000, window_overlap=0, datatype='map', full_name='', unit='unit'):
+    def __init__(self, name, spatial=False, temporal=False, snapshot_interval=cfg.interval_map_snapshots,   # Snapshot_interval defaults to cfg.interval_map_snapshots for consistency across variables
+                 window_size=1000, window_overlap=0, datatype='map', full_name='', unit='unit'):    # Default window size used for all variables unless overridden elsewhere
         self.name = name
         self.spatial = spatial
         self.temporal = temporal
@@ -71,6 +69,36 @@ class StateVariable:
 
 
 # State variables for EWS #
+"""
+NAMING CONVENTION FOR STATE VARIABLES
+
+All state variables follow the naming convention <base><suffix>
+The suffix indicates the spatial-temporal representation of the data:
+
+    M : Map-based spatial snapshot
+        - PCRaster map
+        - Represents the ful spatial field at a given timestep
+        - Used for spatial EWS
+        
+    A : spatially Averaged temporal signal
+        - 1D NumPy array
+        - Each value represents the spatial mean at one timestep
+        - Used for temporal EWS
+        
+    L : single-Location temporal signal
+        - 1D NumPy array
+        - Represents the value at a fixed reporting location
+        - Used to detect local early warning signals
+        
+This is enforced consistently across the EWS code pipeline.
+
+!Note on cumalative states vs. rate variables
+
+Cumulative state variables such as growth and deposition, persist across timesteps and contain system memory,
+    making them particularly suitable for EWS analysis. Rate-based variables represent per timestep fluxes or
+    increments and are interpreted in EWS analysis as indicators of system sensitivity or response rather than stability
+    of a stored state.
+"""
 
 # Maximum interception store
 micM = StateVariable('micM', spatial=True, full_name='Maximum interception storage spatial', unit="m")
@@ -83,9 +111,9 @@ laiA = StateVariable('laiA', temporal=True, datatype='numpy', full_name='LAI tem
 laiL = StateVariable('laiL', temporal=True, datatype='numpy', full_name='LAI at location', unit="-")
 
 # Soil moisture
-moiM = StateVariable('moiM', spatial=True, full_name='Soil moisture spatial', unit="-")
-moiA = StateVariable('moiA', temporal=True, datatype='numpy', full_name='Soil moisture temporal', unit="-")
-moiL = StateVariable('moiL', temporal=True, datatype='numpy', full_name='Soil moisture at location', unit="-")
+moiM = StateVariable('moiM', spatial=True, full_name='Soil moisture spatial', unit="- (fraction)")
+moiA = StateVariable('moiA', temporal=True, datatype='numpy', full_name='Soil moisture temporal', unit="- (fraction)")
+moiL = StateVariable('moiL', temporal=True, datatype='numpy', full_name='Soil moisture at location', unit="- (fraction)")
 
 # Biomass
 bioM = StateVariable('bioM', spatial=True, full_name='Biomass spatial', unit="kg m^-2")
@@ -103,48 +131,48 @@ demA = StateVariable('demA', temporal=True, datatype='numpy', full_name='DEM tem
 demL = StateVariable('demL', temporal=True, datatype='numpy', full_name='DEM at location', unit="m")
 
 # Discharge
-qA = StateVariable('qA', temporal=True, datatype='numpy', full_name='Discharge temporal', unit="m^3 h^-1")
-Rq = StateVariable('Rq', temporal=True, datatype='numpy', full_name='Discharge', unit="m^3 h^-1")
+qA = StateVariable('qA', temporal=True, datatype='numpy', full_name='Discharge temporal', unit="m^3 per timestep")
+Rq = StateVariable('Rq', temporal=True, datatype='numpy', full_name='Discharge', unit="m^3 per timestep")
 
 # Grazing rate
-gA = StateVariable('gA', temporal=True, datatype='numpy', full_name='Grazing rate temporal', unit="kg m^-2 h^-1")
+gA = StateVariable('gA', temporal=True, datatype='numpy', full_name='Grazing rate temporal', unit="kg m^-2 Δt^-1")
 
 # Growth part
-gpM = StateVariable('gpM', spatial=True, full_name='Growth part spatial', unit="kg m^-2 h^-1")
-gpA = StateVariable('gpA', temporal=True, datatype='numpy', full_name='Growth part temporal', unit="kg m^-2 h^-1")
+gpM = StateVariable('gpM', spatial=True, full_name='Growth part spatial', unit="kg m^-2 Δt^-1")
+gpA = StateVariable('gpA', temporal=True, datatype='numpy', full_name='Growth part temporal', unit="kg m^-2 Δt^-1")
 
 # Grazing part
-grM = StateVariable('grM', spatial=True, full_name='Grazing part spatial', unit="kg m^-2 h^-1")
-grA = StateVariable('grA', temporal=True, datatype='numpy', full_name='Grazing part temporal', unit="kg m^-2 h^-1")
+grM = StateVariable('grM', spatial=True, full_name='Grazing part spatial', unit="kg m^-2 Δt^-1")
+grA = StateVariable('grA', temporal=True, datatype='numpy', full_name='Grazing part temporal', unit="kg m^-2 Δt^-1")
 
 # Net growth (growth part + grazing)
-grnM = StateVariable('grnM', spatial=True, full_name='Net growth spatial', unit="kg m^-2 h^-1")
-grnA = StateVariable('grnA', temporal=True, datatype='numpy', full_name='Net growth temporal', unit="kg m^-2 h^-1")
+grnM = StateVariable('grnM', spatial=True, full_name='Net growth spatial', unit="kg m^-2 Δt^-1")
+grnA = StateVariable('grnA', temporal=True, datatype='numpy', full_name='Net growth temporal', unit="kg m^-2 Δt^-1")
 
 # Net deposition
-depM = StateVariable('depM', spatial=True, full_name='Net deposition spatial', unit="~ m h^-1")
-depA = StateVariable('depA', temporal=True, datatype='numpy', full_name='Net deposition temporal', unit="~ m h^-1")
-depL = StateVariable('depL', temporal=True, datatype='numpy', full_name='Net deposition at location', unit="~ m h^-1")
+depM = StateVariable('depM', spatial=True, full_name='Net deposition spatial', unit="m h^-1 (model derived rate)")
+depA = StateVariable('depA', temporal=True, datatype='numpy', full_name='Net deposition temporal', unit="m h^-1 (model derived rate)")
+depL = StateVariable('depL', temporal=True, datatype='numpy', full_name='Net deposition at location', unit="m h^-1 (model derived rate)")
 
 # Net weathering
-weaM = StateVariable('weaM', spatial=True, full_name='Net weathering spatial', unit="m y^-1")
-weaA = StateVariable('weaA', temporal=True, datatype='numpy', full_name='Net weathering temporal', unit="m y^-1")
-weaL = StateVariable('weaL', temporal=True, datatype='numpy', full_name='Net weathering at location', unit="m y^-1")
+weaM = StateVariable('weaM', spatial=True, full_name='Net weathering spatial', unit="m y^-1 (applied per model timestep)")
+weaA = StateVariable('weaA', temporal=True, datatype='numpy', full_name='Net weathering temporal', unit="m y^-1 (applied per model timestep)")
+weaL = StateVariable('weaL', temporal=True, datatype='numpy', full_name='Net weathering at location', unit="m y^-1 (applied per model timestep)")
 
 # Net creep deposition
-creM = StateVariable('creM', spatial=True, full_name='Net creep deposition spatial', unit="m")
-creA = StateVariable('creA', temporal=True, datatype='numpy', full_name='Net creep deposition temporal', unit="m")
-creL = StateVariable('creL', temporal=True, datatype='numpy', full_name='Net creep deposition at location', unit="m")
+creM = StateVariable('creM', spatial=True, full_name='Net creep deposition spatial', unit="m (increment)")
+creA = StateVariable('creA', temporal=True, datatype='numpy', full_name='Net creep deposition temporal', unit="m (increment)")
+creL = StateVariable('creL', temporal=True, datatype='numpy', full_name='Net creep deposition at location', unit="m (increment)")
 
 
 # Check which variables are present in the configuration and append these to the list of variables
 
-# full_set_of_variables_weekly = [micM, micA, micL, laiM, laiA, laiL, moiM, moiA, moiL, bioM, bioA, bioL, regM, regA,
-#                                 regL, demM, demA, demL, qA, gA, gpM, gpA, grM, grA, grnM, grnA, depM, depA, depL, weaM,
-#                                 weaA, weaL, creM, creA, creL]
+full_set_of_variables_weekly = [micM, micA, micL, laiM, laiA, laiL, moiM, moiA, moiL, bioM, bioA, bioL, regM, regA,
+                                regL, demM, demA, demL, qA, gA, gpM, gpA, grM, grA, grnM, grnA, depM, depA, depL, weaM,
+                                weaA, weaL, creM, creA, creL]
 
-full_set_of_variables_weekly = [laiA, laiM, moiA, moiM, moiL, bioA, bioM, bioL, qA, grnA, grnM,
-                                regA, regM, demA, demM, weaA, weaM, creA, creM, grA, gA]
+# full_set_of_variables_weekly = [laiA, laiM, moiA, moiM, moiL, bioA, bioM, bioL, qA, grnA, grnM,
+#                                 regA, regM, demA, demM, weaA, weaM, creA, creM, grA, gA]
 
 full_set_of_variables_hourly = [Rq, moiA, moiM]
 
