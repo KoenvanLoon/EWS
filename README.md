@@ -9,8 +9,8 @@ The code was developed in the context of a Master’s thesis and prioritizes **m
 EWS are statistical indicators designed to detect **critical slowing down** and other precursors of regime shifts in complex systems.
 
 This code provides a **complete EWS pipeline** that allowes one to:
-- Compute EWS from temporal or spatial data,
-- Assess monotonic trends using **Kendall's τ**,
+- Compute EWS from temporal and/or spatial data,
+- Assess trends using **Kendall's τ**,
 - Compare observed trends against **null model distributions**,
 - Explicitly account for **missing data and coverage limitations**.
 
@@ -121,11 +121,9 @@ Activate the environment before running any scripts.
 
 ### 1. Configuring the model
 
-To edit PyCatch model parameters, make necessary changes in EWS_main_configuration.py
+To edit PyCatch model parameters, make necessary changes in EWS_main_configuration.py - note that one needs to run the EWS_pycatch_weekly.py model to get the necessary data to run EWS analysis in the current setup.
 
 To edit EWS parameters (window sizes, indicators, null models, etc.), make necessary changes in EWS_configuration.py - note that some EWS parameters are mirrored from EWS_main_configuration.py.
-
-To remove all output, run clean.sh - this does NOT remove inputs, so there is no major risk of losing input data, but check what is in clean.sh first.
 
 ### 2. Run the EWS analysis
 
