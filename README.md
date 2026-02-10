@@ -1,6 +1,6 @@
 # EWS - Early Warning Signals for Temporal and Spatial Systems
 
-This repository contains a Python implementation of **Early Warning Signal (EWS)** analysis for **temporal and spatial (ecological) systems**, including **null model tetsing** following Dakos et al. (2008, 2011) and related extensions.
+This repository contains a Python implementation of temporal and spatial **Early Warning Signal (EWS)** analysis for **(ecological) systems**, including **null model tetsing** following Dakos et al. (2008, 2011) and related extensions.
 
 The code was developed in the context of a Master’s thesis and prioritizes **methodological transparency, reproducibility, and interpretability** over software packaging or performance optimization.
 
