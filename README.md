@@ -6,7 +6,7 @@ The code was developed in the context of a Master's thesis, and is more focused 
 
 ## What this code does
 
-Pipeline:
+**Pipeline:**
 1. Uses the existing PyCatch model to generate ecological system data
 2. Extracts rolling windows from time series, or maps from spatial data
 3. Computes Early Warning Signals (EWS)
