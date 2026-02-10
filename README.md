@@ -129,7 +129,11 @@ To remove all output, run clean.sh - this does NOT remove inputs, so there is no
 
 ### 2. Run the EWS analysis
 
-Run EWS_weekly.py, this computes EWS (on rolling windows for temporal data) - using EWSPy.py functions - and saves results as .numpy.txt files.
+```bash
+python EWS_weekly.py
+```
+
+Run EWS_weekly.py, this computes EWS (on rolling windows for temporal data) for all enabled indicators - using EWSPy.py functions - and saves results as .numpy.txt files.
 
 ### 3. Generate null models
 
@@ -139,10 +143,18 @@ Temporal null models are implemented in EWS_null_temporal_weekly.py, and spatial
 
 ### 4. Statistical testing & plotting
 
+```bash
+python EWS_Tests.py
+```
+
 EWS_Tests.py computes Kendall τ trends for observed EWS, null model distributions, and quantile tresholds when ran.
 
 Notes on missing data:
 Some indicators (e.g. DFA or spatial power spectrum slope) may return NaN's for individual windows. Kendall τ is computed only when sufficient valid data is available; coverage information is reporated to aid interpretion.
+
+```bash
+python EWS_weekly_plots.py
+```
 
 EWS_weekly_plots.py plots statistical properties over the defined number of weekly time steps the PyCatch model has ran.
 
