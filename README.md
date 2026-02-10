@@ -1,20 +1,45 @@
 # EWS - Early Warning Signals for Temporal and Spatial Systems
 
-This repository contains a Python implementation of **Early Warning Signal (EWS)** analysis for temporal and spatial systems, including **null model tetsing** following Dakos et al. (2008, 2011).
+This repository contains a Python implementation of **Early Warning Signal (EWS)** analysis for **temporal and spatial (ecological) systems**, including **null model tetsing** following Dakos et al. (2008, 2011) and related extensions.
 
-The code was developed in the context of a Master's thesis, and is more focused on reproducibility and methodology, rather than software packaging.
+The code was developed in the context of a Master’s thesis and prioritizes **methodological transparency, reproducibility, and interpretability** over software packaging or performance optimization.
 
 ## What this code does
 
-**Pipeline:**
-1. Uses the existing PyCatch model to generate ecological system data
-2. Extracts rolling windows from time series, or maps from spatial data
-3. Computes Early Warning Signals (EWS)
-4. Generates null models (temporal and spatial)
-5. Tests observed trends using Kendall's τ
-6. Compares observed trends against null distributions
+EWS are statistical indicators designed to detect **critical slowing down** and other precursors of regime shifts in complex systems.
 
-Supported statistical properties include:
+This code provides a **complete EWS pipeline** that allowes one to:
+- Compute EWS from temporal or spatial data,
+- Assess monotonic trends using **Kendall's τ**,
+- Compare observed trends against **null model distributions**,
+- Explicitly account for **missing data and coverage limitations*.
+
+The emphasis is on **statistical inference**, not just indicator visualization.
+
+## Conceptual pipeline
+
+The implemented workflow follows the structure proposed by Dakos et al.:
+
+1. **System simulation or data input**
+   - Temporal time series or spatial maps (using the PyCatch hillslope model).
+
+2. **Windowing / snapshot extraction**
+   - Rolling windows for temporal indicators.
+   - Sequential spatial snapshots for spatial indicators.
+
+3. **EWS computation**
+   - Indicators computed per window or snapshot.
+
+4. **Null model generation**
+   - Temporal and spatial surrogate datasets preserving selected properties.
+
+5. **Trend estimation**
+   - Kendall’s τ between EWS values and time (or forcing).
+  
+6. **Statistical comparison**
+   - Observed τ compared against null distributions and quantile tresholds.
+
+## Supported statistical properties
 
 **Spatial:**
 - Mean
@@ -39,6 +64,26 @@ Supported statistical properties include:
 - Autocorrelation
 - DFA (Detrended Fluctiation Analysis)
 
+## Null models
+
+Null models are used to test whether observed trends exceed what is expected under stochastic variability.
+
+Implemented methods (temporal and spatial where applicable):
+
+1. **Method 1 - Resampling/Shuffling**
+   - Preserves marginal distribution
+
+2. **Method 2 - Phase-randomized Fourier surrogates**
+   - Preserves power spectrum and autocorrelation structure.
+  
+3. **Method 3 - AR(1)-based null models**
+   - Includes:
+       - Standard AR(1)
+       - Adjusted AR(1) following Yearsley (2021)
+   - Variance is explicitly matched post hoc.
+
+Null models are generated automatically when enabled in the configuration.
+
 ## Repository Structure
 
 EWS/
@@ -53,36 +98,41 @@ EWS/
   - EWS_temporal_weekly.py  # Temporal null models
   - EWS_Tests.py  # Kendall τ & null model tests
   - EWS_weekly_plots.py  # Plots results from EWS_weekly.py
-- .gitignore
 - README.md
 - LICENSE
+- .gitignore
 
-## How to run the code
+## Installation & requirements
 
-### 0. PyCatch Installation
+This code was developed in a Conda environment. Core Python dependencies are listed in `requirements.txt`.
 
-Create a conda environment by running pcraster_pycatch.yaml
+For PyCatch-specific functionality, PCRaster is required.
+
+### PyCatch/PCRaster
+
+Create a Conda environment using:
+```bash
+conda env create -f pcraster_pycatch.yaml
+```
+Activate the environment before running any scripts.
+
+## How to run the pipeline
 
 ### 1. Configuring the model
 
 To edit PyCatch model parameters, make necessary changes in EWS_main_configuration.py
 
-To edit EWS parameters, make necessary changes in EWS_configuration.py - note that some EWS parameters are mirrored from EWS_main_configuration.py.
+To edit EWS parameters (window sizes, indicators, null models, etc.), make necessary changes in EWS_configuration.py - note that some EWS parameters are mirrored from EWS_main_configuration.py.
 
 To remove all output, run clean.sh - this does NOT remove inputs, so there is no major risk of losing input data, but check what is in clean.sh first.
 
-### 2. Compute EWS for the system
+### 2. Run the EWS analysis
 
 Run EWS_weekly.py, this computes EWS (on rolling windows for temporal data) - using EWSPy.py functions - and saves results as .numpy.txt files.
 
 ### 3. Generate null models
 
-Null models are generated automatically when enabled in the configuration.
-
-Implemented methods include:
-- Method 1: Resampling/shuffling
-- Method 2: Phase-randomized Fourier surrogates
-- Method 3: AR(1)-based null models
+If enabled in the configuration, null models are generated automatically during the EWS run.
 
 Temporal null models are implemented in EWS_null_temporal_weekly.py, and spatial null models are implemented in EWS_null_spatial_weekly.py.
 
