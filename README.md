@@ -2,7 +2,7 @@
 
 This repository contains a Python implementation of **Early Warning Signal (EWS)** analysis for temporal and spatial systems, including **null model tetsing** following Dakos et al. (2008, 2011).
 
-The code was developed in the context of a Master's thesis, and is more focused no reproducibility and methodology, rather than software packaging.
+The code was developed in the context of a Master's thesis, and is more focused on reproducibility and methodology, rather than software packaging.
 
 ## What this code does
 
