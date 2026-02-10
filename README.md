@@ -99,6 +99,7 @@ EWS/
   - EWS_Tests.py  # Kendall τ & null model tests
   - EWS_weekly_plots.py  # Plots results from EWS_weekly.py
 - README.md
+- requirements.txt
 - LICENSE
 - .gitignore
 
