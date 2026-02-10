@@ -12,7 +12,7 @@ This code provides a **complete EWS pipeline** that allowes one to:
 - Compute EWS from temporal or spatial data,
 - Assess monotonic trends using **Kendall's τ**,
 - Compare observed trends against **null model distributions**,
-- Explicitly account for **missing data and coverage limitations*.
+- Explicitly account for **missing data and coverage limitations**.
 
 The emphasis is on **statistical inference**, not just indicator visualization.
 
