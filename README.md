@@ -156,6 +156,63 @@ python EWS_weekly_plots.py
 
 EWS_weekly_plots.py plots statistical properties over the defined number of weekly time steps the PyCatch model has ran.
 
+## Reproducibility
+
+The main PyCatch model execution uses an explicit random seed, set in `EWS_pycatch_weekly.py`, ensuring that **system simulations are reproducible** given identical configuration files and software versions.
+
+Randomness in this pipeline arises from two sources:
+
+1. **System simulation (PyCatch)**
+   - Controlled via a fixed seed.
+   - Fully reproducible.
+
+2. **Null model generation**
+   - Temporal and spatial null models (e.g. Fourier surrogates, AR(1)-based methods) rely on NumPy’s random number generator.
+   - These routines inherit the global NumPy RNG state at runtime.
+
+For fully deterministic reproduction of null model realizations, users may optionally set an explicit NumPy seed (e.g. `np.random.seed(...)`) before null model generation.
+This is not enforced by default to allow independent surrogate realizations across runs.
+
+All statistical conclusions (Kendall’s τ distributions and quantiles) are robust to individual surrogate realizations when a sufficient number of null datasets is used.
+
+## Known limitations
+
+- **NaN values in EWS indicators**
+  Some indicators (e.g. DFA, PS slope) may return NaN values for individual windows and/or spatial snapshots due to insufficient datapoints or numerical constraints.
+
+- **Trend detection requires sufficient coverage**
+  Kendall’s τ is only meaningful when a sufficient number of valid EWS values exist. Coverage is explicitly reported when τ cannot be computed under strict NaN handling.
+
+- **τ0.95 is a heuristic treshold**
+  Exceeding the 95yh percentile of the null distribution is a strong indication of a non-random trend, but failure to exceed it does not imply absence of an EWS.
+  Effect size and consistency across indicators should be considered.
+
+- **Spatial assumptions**
+  Spatial indicators assume:
+  - Regular grids,
+  - Equal cell spacing,
+  - Rook-neighbourhood adjecency for Moran's I.
+
+- **Computational cost**
+  Spatial null models, especially AR(1)-based methods, can be computationally intensive for large grids.
+
+## Common pitfalls
+
+- **Interpreting Kendall’s τ with missing data**
+  A NaN Kendall τ does not imply absence of a trend, as it often reflects insufficient coverage. In such cases, τ is computed with NaN omission and reported for diagnostic purposes, but should be interpreted cautiously.
+
+- **Comparing observed τ directly to τ0.95**
+  Observed τ values far outside the null-distribution can be informative even when they do not exceed t0.95 - null model comparison is distributional, not binary.
+
+- **Window-size sensitivity**
+  EWS trends can be sensitive to window size and overlap. Window-size sensitivity tests are provided and should be consulted before drawing conclusions.
+
+- **Assuming null models represent "no dynamics"**
+  Null models preserve selected statistical properties (e.g. autocorrelation and power spectrum). They do not represent the absence of structure, only absence of spectral EWS.
+
+- **Expecting identical surrogate results across runs**
+  Null model realizations are stochastic unless the RNG seed is fixed explicitely.
+
 ### References
 
 - Dakos et al. (2008) Slowing down as an early warning signal
