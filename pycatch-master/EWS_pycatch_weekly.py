@@ -42,6 +42,7 @@ def calculateGapFractionAndMaxIntStoreFromLAI(leafAreaIndex):
 # EWS are therefore interpreted as weekly-aggregated system response indicators.
 # (This model serves as a data generator for EWS analysis, NOT as a calibrated hydrological prediction tool.
 
+
 class CatchmentModel(DynamicModel, MonteCarloModel):
 
     def __init__(self):
@@ -49,8 +50,16 @@ class CatchmentModel(DynamicModel, MonteCarloModel):
         MonteCarloModel.__init__(self)
         setclone('inputs_weekly/clone.map')
 
-        # fix the seed for random functions (pcraster) for reproducibility
-        setrandomseed(101)
+        # set PCRaster random seed
+        if cfg.use_fixed_seed:
+            setrandomseed(cfg.random_seed_value)
+        else:
+            setrandomseed(None)
+
+        if cfg.use_fixed_seed:
+            self.rng = np.random.default_rng(cfg.random_seed_value)
+        else:
+            self.rng = np.random.default_rng()
 
         if cfg.filtering:
             ParticleFilterModel.__init__(self)  # type: ignore[misc]
@@ -85,7 +94,7 @@ class CatchmentModel(DynamicModel, MonteCarloModel):
 
         self.createInstancesInitial()
 
-        self.ldd = None  # set by PCRaster components later
+        self.ldd = None  # set by PCRaster components later - some downstream calls in dynamic() assume it exists - which is still okay-ish as it's later set by self.d_regolithdemandbedrock and regolith.
 
         self.d_exchangevariables.upwardSeepageFlux = scalar(0)
         self.d_exchangevariables.evapFromSoilMultiplier = scalar(1)
@@ -247,7 +256,7 @@ class CatchmentModel(DynamicModel, MonteCarloModel):
             # random noise
             # !NOTE: Applied continuously, can dominate long simulations
             #           (Noise is retained for legacy comparability, not realism)
-            netDepositionMetreNoiseFlux = normal(1) / 5000
+            netDepositionMetreNoiseFlux = self.rng.normal(1) / 5000
             # LDD, surface
             actualDepositionNoiseFlux = self.d_regolithdemandbedrock.updateWithDeposition(netDepositionMetreNoiseFlux)
             regolithThickness, demOfBedrock, dem, bedrockLdd, surfaceLdd = self.d_regolithdemandbedrock.getRegolithProperties()
@@ -281,17 +290,18 @@ class CatchmentModel(DynamicModel, MonteCarloModel):
         ###############
         # geomorphology
         ###############
-        if cfg.changeGeomorphology and (self.currentTimeStep() % 52 == 0):
+        if cfg.changeGeomorphology:  # and (self.currentTimeStep() % 52 == 0):   # We're going to update it every timestep to combat annual step-changes
             # bedrock weathering
             regolithThickness, demOfBedrock, dem, bedrockLdd, surfaceLdd = self.d_regolithdemandbedrock.getRegolithProperties()
-            bedrockWeatheringFlux = self.d_bedrockweathering.weatheringRate(regolithThickness)
+            bedrockWeatheringFlux = self.d_bedrockweathering.weatheringRate(regolithThickness) / 52
             # LDD, bedrock
             self.d_regolithdemandbedrock.updateWithBedrockWeathering(bedrockWeatheringFlux)
 
             # creep
             regolithThickness, demOfBedrock, dem, bedrockLdd, surfaceLdd = self.d_regolithdemandbedrock.getRegolithProperties()
+            weeklyTimeStepYears = self.timeStepDuration / (365.0 * 24.0)
             newRegolithThickness, outflow, flowOverBoundaries, correctedFactor, amountX, amountY, inflowX, inflowY = \
-                self.d_creep.diffuse(regolithThickness, dem, 1)
+                self.d_creep.diffuse(regolithThickness, dem, weeklyTimeStepYears)
             self.creepDeposition = newRegolithThickness - regolithThickness
 
             # LDD, surface
@@ -304,7 +314,7 @@ class CatchmentModel(DynamicModel, MonteCarloModel):
 
             # update subsurface store with new regolith thickness
             regolithThickness, demOfBedrock, dem, bedrockLdd, surfaceLdd = self.d_regolithdemandbedrock.getRegolithProperties()
-            amountOfMoistureThickNetAdded = self.d_subsurfaceWaterOneLayer.updateRegolithThickness(regolithThickness)
+            self.d_subsurfaceWaterOneLayer.updateRegolithThickness(regolithThickness)
             # no lateral flow, so bedrock does not need to be updated
             # self.d_subsurfaceWaterOneLayer=updateBedrock(self,bedRockLdd,demOfBedrock)
 
@@ -912,7 +922,7 @@ class CatchmentModel(DynamicModel, MonteCarloModel):
             + lateralFlowInSubsurfaceStore * cellarea() + catchmenttotal(abstractionFromSubSurfaceWaterStore, self.ldd) \
             * cellarea() + catchmenttotal(self.d_exchangevariables.upwardSeepageFlux, self.ldd) * cellarea()
         report(budget, generateNameST('B-tot', currentSampleNumber, currentTimeStep))
-        budgetRel = budget / increaseInRunoffStoreCubicMetresInUpstreamArea
+        budgetRel = budget / increaseInRunoffStoreCubicMetresInUpstreamArea if increaseInRunoffStoreCubicMetresInUpstreamArea != 0 else np.nan  # possible division by zero error countermeasure
         report(budgetRel, generateNameST('B-rel', currentSampleNumber, currentTimeStep))
 
 start_time = timeit.time()

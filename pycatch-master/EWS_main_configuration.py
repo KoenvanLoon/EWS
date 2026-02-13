@@ -30,6 +30,9 @@ number_of_timesteps_weekly = 104000  # ~2000y in weeks
 rel_start_grazing = 0.1
 rel_end_grazing = 0.8
 
+assert 0 <= rel_start_grazing < rel_end_grazing <= 1, \
+    "Grazing start/end ratios must satisfy 0 <= start < end <= 1"
+
 # Define the total increase in grazing rate
 # High carrying capacity
 # tot_increase_grazing = 0.0000705
@@ -53,15 +56,19 @@ maintenanceRate = (0.5 * 1.25) / (365.0 * 24.0)
 # - note that this halfway point occurs on (1 - rel_start) * total time / 2
 return_ini_grazing = False
 
-#################################
-# Number of Monte Carlo (MC) runs
-#################################
+###############################################
+# Number of Monte Carlo (MC) runs & Determinism
+###############################################
 
 # Define the number of MC samples or particles, results of realizations are written to the folder(s) 1, 2, ...
 nrOfSamples = 1
 
 # !NOTE: nrOfSamples = 1 implies deterministic single-run output.
 #   Monte Carlo ensembles are generated separately for null models.
+
+# Toggle for reproducibility
+use_fixed_seed = True       # True; deterministic run, False; stochastic run(s)
+random_seed_value = 101     # Seed to use when use_fixed_seed is True
 
 ####################
 # Particle filtering
@@ -130,7 +137,7 @@ assert number_of_timesteps_weekly % interval_map_snapshots == 0, \
 
 # definition for components were all timesteps should be reported
 timesteps_to_report_all_hourly = list(range(1, number_of_timesteps_hourly + 1, 1))
-timesteps_to_report_all_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))
+timesteps_to_report_all_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))  # Weekly timestop 0 corresponds to the initial state snapshot
 # Note; weekly timesteps start at 0 to include the initial condition. This snapshot is NOT used for temporal EWS calculations, only for spatial diagnostics.
 # timeStepsToReportAll = list(range(1, number_of_timesteps_hourly + 1, 1))
 
@@ -139,7 +146,7 @@ timeStepsToReportRqs = list(range(20, number_of_timesteps_hourly + 1, 20))
 
 # definition for components were a subset of timesteps should be reported
 timesteps_to_report_some_hourly = list(range(100, number_of_timesteps_hourly + 1, 100))
-timesteps_to_report_some_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))
+timesteps_to_report_some_weekly = list(range(0, number_of_timesteps_weekly + 1, interval_map_snapshots))    # Weekly timesteop 0 corresponds to the initial state snapshot
 # Note; weekly timesteps start at 0 to include the initial condition. This snapshot is NOT used for temporal EWS calculations, only for spatial diagnostics.
 # timeStepsToReportSome = list(range(100, number_of_timesteps_hourly + 1, 100))
 
@@ -167,7 +174,7 @@ if setOfVariablesToReport == 'full':
     interception_report_rasters = ["Vo", "Vi", "Vgf", "Vms"]
     #   reports of totals (Vot) only make sense if calculateUpstreamTotals is True
     infiltration_report_rasters_weekly = ["Ii", "Is", "Iks"]
-    infiltration_report_rasters = ["Ii", "Ij", "Is", "Iks"]
+    infiltration_report_rasters = ["Ii", "Ij", "Is", "Iks"]     # TODO - might want to rename this to ""_hourly, as above
     runoff_report_rasters = ["Rq", "Rqs"]
     subsurface_report_rasters = ["Gs", "Go"]
     #   reports of totals (Gxt, Got) only make sense if calculateUpstreamTotals is True
@@ -187,7 +194,7 @@ if setOfVariablesToReport == 'full':
 elif setOfVariablesToReport == 'filtering':
     interception_report_rasters = []
     #   reports of totals (Vot) only make sense if calculateUpstreamTotals is True
-    infiltration_report_rasters_weekly = []
+    infiltration_report_rasters_weekly = ["Iks"]
     infiltration_report_rasters = []
     runoff_report_rasters = []
     subsurface_report_rasters = []
@@ -235,7 +242,7 @@ elif setOfVariablesToReport == 'None':
 ######################
 
 # folder with input files (maps, timeseries)
-inputFolder = "inputs"
+inputFolder = "inputs_weekly"
 
 # switch to report for locations as small numpy files
 # mainly used for particle filtering
@@ -304,7 +311,7 @@ maxSurfaceStoreValue = 0.001
 
 # green and ampt
 ksatValue = 0.0163
-initialSoilMoistureFractionFromDiskValue = str(pathlib.Path(inputFolder, "mergeFieldCapacityFractionFS.map"))
+initialSoilMoistureFractionFromDiskValue = 0.22  # Used to be str(pathlib.Path(inputFolder, "mergeFieldCapacityFractionFS.map"))
 soilPorosityFractionValue = 0.43
 
 

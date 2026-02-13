@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Copyright (c) 2026 Koen van Loon
+#
+# See the LICENSE file in the repository root for full license text.
+
 """
 EWS - Early Warning Signals
 EWS Tests
@@ -10,13 +16,15 @@ import os
 import scipy.stats
 import matplotlib.pyplot as plt
 from scipy import ndimage, signal
-
+import warnings
 import EWSPy as ews
 import EWS_configuration as cfg
 import EWS_StateVariables as ews_sv
 
-tau_treshold = 0.  # heuristic, exploratory
 
+# ==============================================================
+# Plotting utilities
+# ==============================================================
 
 # Helper function for consistent style for plots
 def apply_ews_plot_style(ax, grid=False):
@@ -112,11 +120,16 @@ def extract_ews_data(X, ews_short_name):
     assert X.ndim <= 2, (f"EWS '{ews_short_name}' returned unexpected array shape {X.shape}")
     if ews_short_name == 'coh':
         if X.ndim == 2:
-            return X[0, :]
+            return X[0, :]  # coh returns (statistic, p-value) stacked along axis 0
     if ews_short_name == 'dfa':
         if X.ndim == 2:
             return X[-1, :]
     return X
+
+
+# ==============================================================
+# Kendall tau analysis
+# ==============================================================
 
 # Kendall tau stats
 """
@@ -156,9 +169,9 @@ def kendalltau_stats(state_variable, sum_stat, comp2='Same', path='./1/'):
         dim = '.s.'
 
     tau, p = np.NaN, np.NaN
-    fdict = os.path.join(path + state_variable.name + dim)
-    if os.path.exists(fdict + sum_stat + '.numpy.txt'):
-        X = np.loadtxt(fdict + sum_stat + '.numpy.txt')
+    fname = os.path.join(path, f"{state_variable.name}{dim}{sum_stat}.numpy.txt")
+    if os.path.exists(fname):
+        X = np.loadtxt(fname)
         X = extract_ews_data(X, sum_stat)
 
         Y = None
@@ -166,7 +179,7 @@ def kendalltau_stats(state_variable, sum_stat, comp2='Same', path='./1/'):
             Y = np.arange(len(X))
 
         elif comp2 == 'Forcing':  # Dakos et al, 2011 - Does not work if window sizes are different for the forcing & SV
-            Y = np.loadtxt('./1/gA.t.mn.numpy.txt')
+            Y = np.loadtxt(os.path.join(path, 'gA.t.mn.numpy.txt'))
 
         tau, p = scipy.stats.kendalltau(X, Y, nan_policy='propagate')
 
@@ -229,7 +242,7 @@ def kendalltau_stats_dummy(state_variable, sum_stat, method='m1g', comp2='Same',
     taurray = [np.NaN] * cfg.nr_generated_datasets
     parray = [np.NaN] * cfg.nr_generated_datasets
     for realization in range(cfg.nr_generated_datasets):
-        base = os.path.join( path, f"{method}{str(realization).zfill(generated_number_length)}")
+        base = os.path.join(path, f"{method}{str(realization).zfill(generated_number_length)}")
 
         fdict = os.path.join(base, f"{state_variable.name}{dim}")
         fname = fdict + sum_stat + ".numpy.txt"
@@ -247,9 +260,12 @@ def kendalltau_stats_dummy(state_variable, sum_stat, method='m1g', comp2='Same',
                 Y = np.arange(len(X))
 
             elif comp2 == 'Forcing':  # Dakos et al, 2011 - Does not work if window sizes are different for the forcing & SV, detrending == Gaus
-                Y = np.loadtxt('./1/gA.t.mn.numpy.txt')
+                Y = np.loadtxt(os.path.join(path, 'gA.t.mn.numpy.txt'))
 
             taurray[realization], parray[realization] = scipy.stats.kendalltau(X, Y, nan_policy='propagate')
+
+    if all(np.isnan(taurray)):
+        warnings.warn(f"All null model surrogates missing or invalid for {state_variable.name}, {sum_stat}")
 
     return taurray, parray
 
@@ -308,10 +324,14 @@ def plot_real_trend(state_variable, sum_stat, comp2='Same', path='./1/'):
     if save_plot == 'Y' or save_plot == 'y':
         fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
         for fmt in ["svg", "pdf"]:
-            plt.savefig(path + f"plot_real_trend_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
+            plt.savefig(os.path.join(path, f"plot_real_trend_{state_variable.full_name}_{sum_stat}.{fmt}"), format=fmt, dpi=300)
 
     plt.show()
 
+
+# ==============================================================
+# Null model tests
+# ==============================================================
 
 # Null model
 """
@@ -392,7 +412,9 @@ def plot_null_model(state_variable, sum_stat, comp2='Same', path='./1/', method=
     ax.axvline(tau_obs, color=cfg.EWS_colour_cycle[3], lw=cfg.EWS_linewidth, label=r'$\tau_{\mathrm{obs}}$')
 
     q95 = np.nanpercentile(tau_null_valid, 95)
+    q05 = np.nanpercentile(tau_null_valid, 5)
     ax.axvline(q95, color='k', ls='--', lw=1.5, label=r'$\tau_{0.95}$')
+    ax.axvline(q05, color='k', ls=':', lw=1.5, label=r'$\tau_{0.05}$')
 
     ax.set_xlabel(r'Kendall rank correlation ($\tau$)')
     ax.set_ylabel("Frequency")
@@ -406,10 +428,22 @@ def plot_null_model(state_variable, sum_stat, comp2='Same', path='./1/', method=
     if save_plot == 'Y' or save_plot == 'y':
         fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
         for fmt in ["svg", "pdf"]:
-            plt.savefig(path + f"plot_null_model_{method}_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
+            plt.savefig(os.path.join(path, f"plot_null_model_{method}_{state_variable.full_name}_{sum_stat}.{fmt}"), format=fmt, dpi=300)
+
+    p_emp = np.mean(np.abs(tau_null_valid) >= np.abs(tau_obs))
+    print(f"Empirical p-value (null exceedance): {p_emp:.4f}")
+
+    print(f"Null τ mean: {np.mean(tau_null_valid):.4f}")
+    print(f"Null τ median: {np.median(tau_null_valid):.4f}")
+    print(f"Null τ std: {np.std(tau_null_valid):.4f}")
+    print(f"Null τ skewness: {scipy.stats.skew(tau_null_valid):.4f}")
 
     plt.show()
 
+
+# ==============================================================
+# Sensitivity analysis
+# ==============================================================
 
 # Sensitivity
 """
@@ -482,7 +516,7 @@ def plot_sensitivity(timeseries, ews_function, x_values, y_values, window_overla
     if save_plot == 'Y' or save_plot == 'y':
         fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
         for fmt in ["svg", "pdf"]:
-            plt.savefig(path + f"plot_sensitivity_{ews_function}.{fmt}", format=fmt, dpi=300)
+            plt.savefig(os.path.join(path, f"plot_sensitivity_{ews_function.__name__}.{fmt}"), format=fmt, dpi=300)
 
     plt.show()
 
@@ -525,9 +559,11 @@ def window(timeseries, window_size, window_overlap):
     sh = (timeseries.size - window_size + 1, window_size)
     st = timeseries.strides * 2
     if window_overlap != 0:
-        return np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::actual_window_overlap]
+        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::actual_window_overlap]
+        return view.copy()
     elif window_overlap == 0:
-        return np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::window_size]
+        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::window_size]
+        return view.copy()
 
 
 # Windowsize tests
@@ -560,7 +596,7 @@ def test_windowsize(state_variable, sum_stat, path='./1/', method='None'):
 
     # Loading files
     fname = ews.file_name_str(state_variable.name, cfg.number_of_timesteps_weekly)
-    fpath = os.path.join(path + fname)
+    fpath = os.path.join(path, fname)
     ts = np.loadtxt(fpath + '.numpy.txt')
 
     if cfg.cutoff:
@@ -621,7 +657,7 @@ def test_windowsize(state_variable, sum_stat, path='./1/', method='None'):
     if save_plot == 'Y' or save_plot == 'y':
         fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
         for fmt in ["svg", "pdf"]:
-            plt.savefig(path + f"windowsize_test_{method}_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
+            plt.savefig(os.path.join(path, f"windowsize_test_{method}_{state_variable.full_name}_{sum_stat}.{fmt}"), format=fmt, dpi=300)
 
     plt.show()
 
@@ -653,7 +689,7 @@ def test_windowgauss(state_variable, sum_stat, path='./1/'):
 
     # Loading files
     fname = ews.file_name_str(state_variable.name, cfg.number_of_timesteps_weekly)
-    fpath = os.path.join(path + fname)
+    fpath = os.path.join(path, fname)
     ts = np.loadtxt(fpath + '.numpy.txt')
 
     if cfg.cutoff:
@@ -711,10 +747,14 @@ def test_windowgauss(state_variable, sum_stat, path='./1/'):
     if save_plot == 'Y' or save_plot == 'y':
         fig.text(0.995, 0.005, "EWSPy - KvL", ha='right', va='bottom', fontsize=6, alpha=0.25)
         for fmt in ["svg", "pdf"]:
-            plt.savefig(path + f"window_gauss_test_{state_variable.full_name}_{sum_stat}.{fmt}", format=fmt, dpi=300)
+            plt.savefig(os.path.join(path, f"window_gauss_test_{state_variable.full_name}_{sum_stat}.{fmt}"), format=fmt, dpi=300)
 
     plt.show()
 
+
+# ==============================================================
+# User inputs
+# ==============================================================
 
 # User input Tests-plot looper
 """
@@ -765,8 +805,13 @@ def user_input_tests_looper(path='./1/'):
         )
 
     elif choice == '2':
-        print("Choose null model [m1g, m2g, m3g]:")
+        print("Choose null model [m1g, m2g, m3g, m2bg]:")
         method = input()
+        valid_methods = ['m1g', 'm2g', 'm3g', 'm2bg']
+        if method not in valid_methods:
+            print("Invalid null model.")
+            return
+
         plot_null_model(
             state_variable=state_variable,
             sum_stat=sum_stat,

@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Copyright (c) 2026 Koen van Loon
+#
+# See the LICENSE file in the repository root for full license text.
+
 """
 EWS - Early Warning Signals
 EWS State Variables
@@ -6,7 +12,6 @@ EWS State Variables
 """
 
 import EWS_configuration as cfg
-
 
 # Class StateVariable for Variable objects
 """
@@ -46,7 +51,7 @@ Example:
 Index Fund :
 
     INDF = StateVariable('INDF', temporal=True, datatype='numpy', window_size=30, window_overlap=0, 
-        datatype='numpy.txt', full_name='Index fund closing value', unit="Dollars ($)")
+        full_name='Index fund closing value', unit="Dollars ($)")
     
 """
 
@@ -55,8 +60,8 @@ variables_hourly = []
 
 
 class StateVariable:
-    def __init__(self, name, spatial=False, temporal=False, snapshot_interval=cfg.interval_map_snapshots,   # Snapshot_interval defaults to cfg.interval_map_snapshots for consistency across variables
-                 window_size=1000, window_overlap=0, datatype='map', full_name='', unit='unit'):    # Default window size used for all variables unless overridden elsewhere
+    def __init__(self, name, spatial=False, temporal=False, snapshot_interval=cfg.interval_map_snapshots,          # Snapshot_interval defaults to cfg.interval_map_snapshots for consistency across variables
+                 window_size=cfg.default_window_size, window_overlap=0, datatype=None, full_name='', unit='unit'):    # Default window size used for all variables unless overridden elsewhere
         self.name = name
         self.spatial = spatial
         self.temporal = temporal
@@ -66,6 +71,12 @@ class StateVariable:
         self.datatype = datatype
         self.full_name = full_name
         self.unit = unit
+        if not (spatial or temporal):
+            raise ValueError(f"StateVariable '{name}' must be spatial or temporal.")
+
+    def __repr__(self):
+        kind = "spatial" if self.spatial else "temporal"
+        return f"<StateVariable {self.name} ({kind})>"
 
 
 # State variables for EWS #
@@ -101,32 +112,32 @@ Cumulative state variables such as growth and deposition, persist across timeste
 """
 
 # Maximum interception store
-micM = StateVariable('micM', spatial=True, full_name='Maximum interception storage spatial', unit="m")
+micM = StateVariable('micM', spatial=True, datatype='map', full_name='Maximum interception storage spatial', unit="m")
 micA = StateVariable('micA', temporal=True, datatype='numpy', full_name='Maximum interception storage temporal', unit="m")
 micL = StateVariable('micL', temporal=True, datatype='numpy', full_name='Maximum interception storage at location', unit="m")
 
 # LAI
-laiM = StateVariable('laiM', spatial=True, full_name='LAI spatial', unit="-")
+laiM = StateVariable('laiM', spatial=True, datatype='map', full_name='LAI spatial', unit="-")
 laiA = StateVariable('laiA', temporal=True, datatype='numpy', full_name='LAI temporal', unit="-")
 laiL = StateVariable('laiL', temporal=True, datatype='numpy', full_name='LAI at location', unit="-")
 
 # Soil moisture
-moiM = StateVariable('moiM', spatial=True, full_name='Soil moisture spatial', unit="- (fraction)")
+moiM = StateVariable('moiM', spatial=True, datatype='map', full_name='Soil moisture spatial', unit="- (fraction)")
 moiA = StateVariable('moiA', temporal=True, datatype='numpy', full_name='Soil moisture temporal', unit="- (fraction)")
 moiL = StateVariable('moiL', temporal=True, datatype='numpy', full_name='Soil moisture at location', unit="- (fraction)")
 
 # Biomass
-bioM = StateVariable('bioM', spatial=True, full_name='Biomass spatial', unit="kg m^-2")
+bioM = StateVariable('bioM', spatial=True, datatype='map', full_name='Biomass spatial', unit="kg m^-2")
 bioA = StateVariable('bioA', temporal=True, datatype='numpy', full_name='Biomass temporal', unit="kg m^-2")
 bioL = StateVariable('bioL', temporal=True, datatype='numpy', full_name='Biomass at location', unit="kg m^-2")
 
 # Regolith thickness
-regM = StateVariable('regM', spatial=True, full_name='Regolith thickness spatial', unit="m")
+regM = StateVariable('regM', spatial=True, datatype='map', full_name='Regolith thickness spatial', unit="m")
 regA = StateVariable('regA', temporal=True, datatype='numpy', full_name='Regolith thickness temporal', unit="m")
 regL = StateVariable('regL', temporal=True, datatype='numpy', full_name='Regolith thickness at location', unit="m")
 
 # DEM
-demM = StateVariable('demM', spatial=True, full_name='DEM spatial', unit="m")
+demM = StateVariable('demM', spatial=True, datatype='map', full_name='DEM spatial', unit="m")
 demA = StateVariable('demA', temporal=True, datatype='numpy', full_name='DEM temporal', unit="m")
 demL = StateVariable('demL', temporal=True, datatype='numpy', full_name='DEM at location', unit="m")
 
@@ -138,29 +149,29 @@ Rq = StateVariable('Rq', temporal=True, datatype='numpy', full_name='Discharge',
 gA = StateVariable('gA', temporal=True, datatype='numpy', full_name='Grazing rate temporal', unit="kg m^-2 Δt^-1")
 
 # Growth part
-gpM = StateVariable('gpM', spatial=True, full_name='Growth part spatial', unit="kg m^-2 Δt^-1")
+gpM = StateVariable('gpM', spatial=True, datatype='map', full_name='Growth part spatial', unit="kg m^-2 Δt^-1")
 gpA = StateVariable('gpA', temporal=True, datatype='numpy', full_name='Growth part temporal', unit="kg m^-2 Δt^-1")
 
 # Grazing part
-grM = StateVariable('grM', spatial=True, full_name='Grazing part spatial', unit="kg m^-2 Δt^-1")
+grM = StateVariable('grM', spatial=True, datatype='map', full_name='Grazing part spatial', unit="kg m^-2 Δt^-1")
 grA = StateVariable('grA', temporal=True, datatype='numpy', full_name='Grazing part temporal', unit="kg m^-2 Δt^-1")
 
 # Net growth (growth part + grazing)
-grnM = StateVariable('grnM', spatial=True, full_name='Net growth spatial', unit="kg m^-2 Δt^-1")
+grnM = StateVariable('grnM', spatial=True, datatype='map', full_name='Net growth spatial', unit="kg m^-2 Δt^-1")
 grnA = StateVariable('grnA', temporal=True, datatype='numpy', full_name='Net growth temporal', unit="kg m^-2 Δt^-1")
 
 # Net deposition
-depM = StateVariable('depM', spatial=True, full_name='Net deposition spatial', unit="m h^-1 (model derived rate)")
+depM = StateVariable('depM', spatial=True, datatype='map', full_name='Net deposition spatial', unit="m h^-1 (model derived rate)")
 depA = StateVariable('depA', temporal=True, datatype='numpy', full_name='Net deposition temporal', unit="m h^-1 (model derived rate)")
 depL = StateVariable('depL', temporal=True, datatype='numpy', full_name='Net deposition at location', unit="m h^-1 (model derived rate)")
 
 # Net weathering
-weaM = StateVariable('weaM', spatial=True, full_name='Net weathering spatial', unit="m y^-1 (applied per model timestep)")
+weaM = StateVariable('weaM', spatial=True, datatype='map', full_name='Net weathering spatial', unit="m y^-1 (applied per model timestep)")
 weaA = StateVariable('weaA', temporal=True, datatype='numpy', full_name='Net weathering temporal', unit="m y^-1 (applied per model timestep)")
 weaL = StateVariable('weaL', temporal=True, datatype='numpy', full_name='Net weathering at location', unit="m y^-1 (applied per model timestep)")
 
 # Net creep deposition
-creM = StateVariable('creM', spatial=True, full_name='Net creep deposition spatial', unit="m (increment)")
+creM = StateVariable('creM', spatial=True, datatype='map', full_name='Net creep deposition spatial', unit="m (increment)")
 creA = StateVariable('creA', temporal=True, datatype='numpy', full_name='Net creep deposition temporal', unit="m (increment)")
 creL = StateVariable('creL', temporal=True, datatype='numpy', full_name='Net creep deposition at location', unit="m (increment)")
 
@@ -176,15 +187,24 @@ full_set_of_variables_weekly = [micM, micA, micL, laiM, laiA, laiL, moiM, moiA, 
 
 full_set_of_variables_hourly = [Rq, moiA, moiM]
 
-if cfg.state_variables_for_ews_weekly == 'full':
+
+lookup_weekly = {v.name: v for v in full_set_of_variables_weekly}
+
+if cfg.state_variables_for_ews_weekly == 'full':    # Magick String - Fragile
     variables_weekly = full_set_of_variables_weekly
 else:
-    for state_variable in cfg.state_variables_for_ews_weekly:
-        for variable in full_set_of_variables_weekly:
-            if variable.name == state_variable:
-                variables_weekly.append(variable)
+    variables_weekly = [lookup_weekly[name] for name in cfg.state_variables_for_ews_weekly if name in lookup_weekly]
 
-if cfg.state_variables_for_ews_hourly == 'full':
+missing = [name for name in cfg.state_variables_for_ews_weekly if name not in lookup_weekly]
+
+if missing:
+    raise ValueError(f"Unknown state variable(s): {missing}")
+
+if not variables_weekly:
+    raise ValueError("No weekly state variables selected.")
+
+
+if cfg.state_variables_for_ews_hourly == 'full':    # Magick String - Fragile
     variables_hourly = full_set_of_variables_hourly
 else:
     for state_variable in cfg.state_variables_for_ews_hourly:

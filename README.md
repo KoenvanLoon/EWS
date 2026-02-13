@@ -1,16 +1,16 @@
 # EWS - Early Warning Signals for Temporal and Spatial Systems
 
-This repository contains a Python implementation of temporal and spatial **Early Warning Signal (EWS)** analysis for **(ecological) systems**, including **null model tetsing** following Dakos et al. (2008, 2011) and related extensions.
+This repository contains a Python implementation of temporal and spatial **Early Warning Signal (EWS)** analysis for **(ecological) systems**, including **null model testing** following Dakos et al. (2008, 2011) and related extensions.
 
-The code was developed in the context of a Master’s thesis and prioritizes **methodological transparency, reproducibility, and interpretability** over software packaging or performance optimization.
+The code was developed in the context of a Master's thesis and prioritizes **methodological transparency, reproducibility, and interpretability** over software packaging or performance optimization.
 
 ## What this code does
 
 EWS are statistical indicators designed to detect **critical slowing down** and other precursors of regime shifts in complex systems.
 
-This code provides a **complete EWS pipeline** that allowes one to:
+This code provides a **complete EWS pipeline** which allows one to:
 - Compute EWS from temporal and/or spatial data,
-- Assess trends using **Kendall's τ**,
+- Assess trends using **Kendall's &tau;**,
 - Compare observed trends against **null model distributions**,
 - Explicitly account for **missing data and coverage limitations**.
 
@@ -34,10 +34,10 @@ The implemented workflow follows the structure proposed by Dakos et al.:
    - Temporal and spatial surrogate datasets preserving selected properties.
 
 5. **Trend estimation**
-   - Kendall’s τ between EWS values and time (or forcing).
+   - Kendall's &tau; between EWS values and time (or forcing).
   
 6. **Statistical comparison**
-   - Observed τ compared against null distributions and quantile tresholds.
+   - Observed &tau; compared against null distributions and quantile thresholds.
 
 ## Supported statistical properties
 
@@ -62,7 +62,7 @@ The implemented workflow follows the structure proposed by Dakos et al.:
 - Return rate
 - Conditional heteroskedasticity
 - Autocorrelation
-- DFA (Detrended Fluctiation Analysis)
+- DFA (Detrended Fluctuation Analysis)
 
 ## Null models
 
@@ -88,16 +88,16 @@ Null models are generated automatically when enabled in the configuration.
 
 EWS/
 - pycatch-master
-  - EWS_main_configuration.py  # Main configuration for EWS_pycatch_weekly.py
-  - EWS_configuration.py  # EWS centered configuration
-  - EWS_pycatch_weekly.py  # PyCatch hillslope model
-  - EWS_StateVariables.py  # State variable definitions
-  - EWSPy.py  # Core EWS functions
-  - EWS_weekly.py  # Main EWS pipeline
+  - EWS_main_configuration.py   # Main configuration for EWS_pycatch_weekly.py
+  - EWS_configuration.py        # EWS centered configuration
+  - EWS_pycatch_weekly.py       # PyCatch hillslope model
+  - EWS_StateVariables.py       # State variable definitions
+  - EWSPy.py                    # Core EWS functions
+  - EWS_weekly.py               # Main EWS pipeline
   - EWS_null_spatial_weekly.py  # Spatial null models
-  - EWS_temporal_weekly.py  # Temporal null models
-  - EWS_Tests.py  # Kendall τ & null model tests
-  - EWS_weekly_plots.py  # Plots results from EWS_weekly.py
+  - EWS_temporal_weekly.py      # Temporal null models
+  - EWS_Tests.py                # Kendall &tau; & null model tests
+  - EWS_weekly_plots.py         # Plots results from EWS_weekly.py
 - README.md
 - requirements.txt
 - LICENSE
@@ -145,10 +145,10 @@ Temporal null models are implemented in EWS_null_temporal_weekly.py, and spatial
 python EWS_Tests.py
 ```
 
-EWS_Tests.py computes Kendall τ trends for observed EWS, null model distributions, and quantile tresholds when ran.
+EWS_Tests.py computes Kendall &tau; trends for observed EWS, null model distributions, and quantile thresholds when run.
 
 Notes on missing data:
-Some indicators (e.g. DFA or spatial power spectrum slope) may return NaN's for individual windows. Kendall τ is computed only when sufficient valid data is available; coverage information is reporated to aid interpretion.
+Some indicators (e.g. DFA or spatial power spectrum slope) may return NaN's for individual windows. Kendall &tau; is computed only when sufficient valid data is available; coverage information is reporeted to aid interpretation.
 
 ```bash
 python EWS_weekly_plots.py
@@ -167,13 +167,13 @@ Randomness in this pipeline arises from two sources:
    - Fully reproducible.
 
 2. **Null model generation**
-   - Temporal and spatial null models (e.g. Fourier surrogates, AR(1)-based methods) rely on NumPy’s random number generator.
+   - Temporal and spatial null models (e.g. Fourier surrogates, AR(1)-based methods) rely on NumPy's random number generator.
    - These routines inherit the global NumPy RNG state at runtime.
 
 For fully deterministic reproduction of null model realizations, users may optionally set an explicit NumPy seed (e.g. `np.random.seed(...)`) before null model generation.
 This is not enforced by default to allow independent surrogate realizations across runs.
 
-All statistical conclusions (Kendall’s τ distributions and quantiles) are robust to individual surrogate realizations when a sufficient number of null datasets is used.
+All statistical conclusions (Kendall's &tau; distributions and quantiles) are robust to individual surrogate realizations when a sufficient number of null datasets is used.
 
 ## Known limitations
 
@@ -181,9 +181,9 @@ All statistical conclusions (Kendall’s τ distributions and quantiles) are rob
   Some indicators (e.g. DFA, PS slope) may return NaN values for individual windows and/or spatial snapshots due to insufficient datapoints or numerical constraints.
 
 - **Trend detection requires sufficient coverage**
-  Kendall’s τ is only meaningful when a sufficient number of valid EWS values exist. Coverage is explicitly reported when τ cannot be computed under strict NaN handling.
+  Kendall's &tau; is only meaningful when a sufficient number of valid EWS values exist. Coverage is explicitly reported when &tau; cannot be computed under strict NaN handling.
 
-- **τ0.95 is a heuristic treshold**
+- **&tau;0.95 is a heuristic threshold**
   Exceeding the 95yh percentile of the null distribution is a strong indication of a non-random trend, but failure to exceed it does not imply absence of an EWS.
   Effect size and consistency across indicators should be considered.
 
@@ -191,18 +191,18 @@ All statistical conclusions (Kendall’s τ distributions and quantiles) are rob
   Spatial indicators assume:
   - Regular grids,
   - Equal cell spacing,
-  - Rook-neighbourhood adjecency for Moran's I.
+  - Rook-neighbourhood adjacency for Moran's I.
 
 - **Computational cost**
   Spatial null models, especially AR(1)-based methods, can be computationally intensive for large grids.
 
 ## Common pitfalls
 
-- **Interpreting Kendall’s τ with missing data**
-  A NaN Kendall τ does not imply absence of a trend, as it often reflects insufficient coverage. In such cases, τ is computed with NaN omission and reported for diagnostic purposes, but should be interpreted cautiously.
+- **Interpreting Kendall's &tau; with missing data**
+  A NaN Kendall &tau; does not imply absence of a trend, as it often reflects insufficient coverage. In such cases, &tau; is computed with NaN omission and reported for diagnostic purposes, but should be interpreted cautiously.
 
-- **Comparing observed τ directly to τ0.95**
-  Observed τ values far outside the null-distribution can be informative even when they do not exceed t0.95 - null model comparison is distributional, not binary.
+- **Comparing observed &tau; directly to &tau;0.95**
+  Observed &tau; values far outside the null-distribution can be informative even when they do not exceed t0.95 - null model comparison is distributional, not binary.
 
 - **Window-size sensitivity**
   EWS trends can be sensitive to window size and overlap. Window-size sensitivity tests are provided and should be consulted before drawing conclusions.
@@ -211,7 +211,7 @@ All statistical conclusions (Kendall’s τ distributions and quantiles) are rob
   Null models preserve selected statistical properties (e.g. autocorrelation and power spectrum). They do not represent the absence of structure, only absence of spectral EWS.
 
 - **Expecting identical surrogate results across runs**
-  Null model realizations are stochastic unless the RNG seed is fixed explicitely.
+  Null model realizations are stochastic unless the RNG seed is fixed explicitly.
 
 ### References
 
@@ -220,5 +220,7 @@ All statistical conclusions (Kendall’s τ distributions and quantiles) are rob
 - Yearsley (2021) Adjusted AR(1) null models
 
 ### License
+
+Source files include SPDX license identifiers for automated license detection.
 
 See the LICENSE file for details.
