@@ -81,6 +81,10 @@ Implemented methods (temporal and spatial where applicable):
        - Standard AR(1)
        - Adjusted AR(1) following Yearsley (2021)
    - Variance is explicitly matched post hoc.
+  
+4. **Method 2B - IAAFT-based null models**
+   - Iterative Amplitude Adjusted Fourier Transform (Schreiber & Schmitz, 1996, 2000).
+   - Preserves amplitude structure and linear structure.
 
 Null models are generated automatically when enabled in the configuration.
 
@@ -218,6 +222,7 @@ All statistical conclusions (Kendall's &tau; distributions and quantiles) are ro
 - Dakos et al. (2008) Slowing down as an early warning signal
 - Dakos et al. (2011) Methods for detecting early warnings of critical transitions
 - Yearsley (2021) Adjusted AR(1) null models
+- Schreiber & Schmitz (1996, 2000)
 
 ### License
 
