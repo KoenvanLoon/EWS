@@ -12,8 +12,7 @@ Null models spatial weekly
 """
 
 import numpy as np
-from scipy import fft
-from scipy import ndimage
+from scipy import fft, ndimage
 from scipy.sparse import coo_matrix, identity
 from scipy.sparse.linalg import spsolve
 import os
@@ -127,6 +126,7 @@ def method1_(dataset, realizations=1, path='./1/', variable='xxx', replace=False
                       cfg.interval_map_snapshots)
 
     for k, data in enumerate(dataset):
+        ny, nx = data.shape
         data_new = data.copy()
         data_1d = data_new.ravel()
         for realization in range(realizations):
@@ -138,7 +138,8 @@ def method1_(dataset, realizations=1, path='./1/', variable='xxx', replace=False
                 warnings.warn(f"Dataset too small or has repeated values; falling back to replace=True for variable {variable.name}")
                 generated_dataset_numpy = np.random.choice(data_1d, len(data_1d), replace=True)
 
-            generated_dataset = numpy2pcr(Scalar, generated_dataset_numpy, np.NaN)
+            generated_dataset_2d = generated_dataset_numpy.reshape(ny, nx)
+            generated_dataset = numpy2pcr(Scalar, generated_dataset_2d, np.NaN)
 
             generated_number_string = 'm1g' + str(realization).zfill(generated_number_length)
             dir_name = os.path.join(path, generated_number_string)
@@ -362,7 +363,7 @@ Generate IAAFT (Iterative Amplitude Adjusted Fourier Transform (Schreiber & Schm
 """
 
 
-def iaaft_spatial(data, max_iter=100, tol=1e-6):
+def iaaft_spatial(data, max_iter=125, tol=1e-6):
 
     # Flatten original for rank mapping
     original_flat = data.ravel()

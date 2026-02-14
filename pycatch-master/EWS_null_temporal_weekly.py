@@ -301,7 +301,7 @@ Generate IAAFT (Iterative Amplitude Adjusted Fourier Transform (Schreiber & Schm
 """
 
 
-def iaaft_temporal(data, max_iter=200, tol=1e-8):
+def iaaft_temporal(data, max_iter=250, tol=1e-8):
     x = np.asarray(data)
     n = len(x)
 

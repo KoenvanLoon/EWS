@@ -195,10 +195,10 @@ if cfg.state_variables_for_ews_weekly == 'full':    # Magick String - Fragile
 else:
     variables_weekly = [lookup_weekly[name] for name in cfg.state_variables_for_ews_weekly if name in lookup_weekly]
 
-missing = [name for name in cfg.state_variables_for_ews_weekly if name not in lookup_weekly]
+    missing = [name for name in cfg.state_variables_for_ews_weekly if name not in lookup_weekly]
 
-if missing:
-    raise ValueError(f"Unknown state variable(s): {missing}")
+    if missing:
+        raise ValueError(f"Unknown state variable(s): {missing}")
 
 if not variables_weekly:
     raise ValueError("No weekly state variables selected.")
