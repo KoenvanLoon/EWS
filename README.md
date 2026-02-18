@@ -158,7 +158,7 @@ Reproducibility is controlled at two levels:
    - Not fixed by default (independent realizations per run).
    - Users may optionally set:
      ```python
-     np.random.seed(...)
+     numpy.random.seed(...)
      ```
 
 All statistical conclusions (Kendall's &tau; distributions and quantiles) are robust to individual surrogate realizations when a sufficient number of null datasets is used.
