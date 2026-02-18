@@ -17,6 +17,55 @@ This code provides a **complete EWS pipeline** which allows one to:
 
 The emphasis is on **statistical inference**, not just indicator visualization.
 
+## Installation & requirements
+
+This code was developed in a Conda environment. Core Python dependencies are listed in `requirements.txt`.
+
+For PyCatch-specific functionality, **PCRaster** is required.
+
+### PyCatch/PCRaster
+
+Create a Conda environment using:
+```bash
+conda env create -f pcraster_pycatch.yaml
+```
+Activate the environment before running any scripts.
+
+## How to run the pipeline
+
+### 1. Configuring the model
+
+To edit PyCatch model parameters, make necessary changes in `EWS_main_configuration.py` - note that one needs to run the EWS_pycatch_weekly.py model to get the necessary data to run EWS analysis in the current setup.
+
+To edit EWS parameters (window sizes, indicators, null models, etc.), make necessary changes in `EWS_configuration.py` - note that some EWS parameters are mirrored from EWS_main_configuration.py.
+
+### 2. Run the EWS analysis
+
+```bash
+python EWS_weekly.py
+```
+
+Run EWS_weekly.py, this computes EWS (on rolling windows for temporal data) for all enabled indicators - using `EWSPy.py functions` - and saves results as `.numpy.txt` files.
+
+If enabled, null models are generated automatically.
+
+### 3. Statistical testing
+
+```bash
+python EWS_Tests.py
+```
+
+This script computes Kendall's &tau; for observed EWS and computes null model &tau; distributions, reporting empirical quantiles and exceedance probablilities, reporting coverage diagnostics when NaNs are present.
+
+### 4. Plotting
+
+```bash
+python EWS_weekly_plots.py
+```
+
+EWS_weekly_plots.py plots raw indicators over the defined number of weekly time steps the PyCatch model has ran (temporal evolution), with the option for multi-variable overlays.
+
+
 ## Conceptual pipeline
 
 The implemented workflow follows the structure proposed by Dakos et al.:
@@ -96,78 +145,11 @@ Implemented methods (temporal and spatial where applicable):
 
 Null models are generated automatically when enabled in the configuration.
 
-## Repository Structure
-
-EWS/
-- pycatch-master/
-  - EWS_main_configuration.py      # Main configuration for EWS_pycatch_weekly.py
-  - EWS_configuration.py           # EWS centered configuration
-  - EWS_pycatch_weekly.py          # PyCatch hillslope model
-  - EWS_StateVariables.py          # State variable definitions
-  - EWSPy.py                       # Core EWS functions
-  - EWS_weekly.py                  # Main EWS pipeline
-  - EWS_null_spatial_weekly.py     # Spatial null models
-  - EWS_null-temporal_weekly.py    # Temporal null models
-  - EWS_Tests.py                   # Kendall &tau; & null model tests
-  - EWS_weekly_plots.py            # Plots results from EWS_weekly.py
-- README.md
-- requirements.txt
-- LICENSE
-- .gitignore
-
-## Installation & requirements
-
-This code was developed in a Conda environment. Core Python dependencies are listed in `requirements.txt`.
-
-For PyCatch-specific functionality, **PCRaster** is required.
-
-### PyCatch/PCRaster
-
-Create a Conda environment using:
-```bash
-conda env create -f pcraster_pycatch.yaml
-```
-Activate the environment before running any scripts.
-
-## How to run the pipeline
-
-### 1. Configuring the model
-
-To edit PyCatch model parameters, make necessary changes in `EWS_main_configuration.py` - note that one needs to run the EWS_pycatch_weekly.py model to get the necessary data to run EWS analysis in the current setup.
-
-To edit EWS parameters (window sizes, indicators, null models, etc.), make necessary changes in `EWS_configuration.py` - note that some EWS parameters are mirrored from EWS_main_configuration.py.
-
-### 2. Run the EWS analysis
-
-```bash
-python EWS_weekly.py
-```
-
-Run EWS_weekly.py, this computes EWS (on rolling windows for temporal data) for all enabled indicators - using `EWSPy.py functions` - and saves results as `.numpy.txt` files.
-
-If enabled, null models are generated automatically.
-
-### 3. Statistical testing
-
-```bash
-python EWS_Tests.py
-```
-
-This script computes Kendall's &tau; for observed EWS and computes null model &tau; distributions, reporting empirical quantiles and exceedance probablilities, reporting coverage diagnostics when NaNs are present.
-
-### 4. Plotting
-
-```bash
-python EWS_weekly_plots.py
-```
-
-EWS_weekly_plots.py plots raw indicators over the defined number of weekly time steps the PyCatch model has ran (temporal evolution), with the option for multi-variable overlays.
-
 ## Reproducibility
 
 Reproducibility is controlled at two levels:
 
-1. **System simulation (PyCatch)
+1. **System simulation (PyCatch)**
    - Fixed random seed in `EWS_pycatch_weekly.py`.
    - Fully reproducible for identical configurations.
      
@@ -190,40 +172,40 @@ All statistical conclusions (Kendall's &tau; distributions and quantiles) are ro
 
 ## Known limitations
 
-- **NaN values in EWS indicators**
+- **NaN values in EWS indicators:**
   Some indicators (e.g. DFA, PS slope) may return NaN values for individual windows and/or spatial snapshots due to insufficient datapoints or numerical constraints.
 
-- **Trend detection requires sufficient coverage**
+- **Trend detection requires sufficient coverage:**
   Kendall's &tau; is only meaningful when a sufficient number of valid EWS values exist. Coverage is explicitly reported when &tau; cannot be computed under strict NaN handling.
 
-- **&tau;0.05 and &tau;0.95 are heuristic thresholds**
+- **&tau;0.05 and &tau;0.95 are heuristic thresholds:**
   Exceeding the 95th percentile of the null distribution is a strong indication of a non-random trend, but failure to exceed it does not imply absence of an EWS.
   Effect size and consistency across indicators should be considered.
 
-- **Spatial assumptions**
+- **Spatial assumptions:**
   Spatial indicators assume:
   - Regular grids,
   - Equal cell spacing,
   - Rook-neighbourhood adjacency for Moran's I.
 
-- **Computational cost**
+- **Computational cost:**
   Spatial null models, especially AR(1)-based methods, can be computationally intensive for large grids.
 
 ## Common pitfalls
 
-- **Interpreting Kendall's &tau; with missing data**
+- **Interpreting Kendall's &tau; with missing data:**
   A NaN Kendall &tau; does not imply absence of a trend, as it often reflects insufficient coverage. In such cases, &tau; is computed with NaN omission and reported for diagnostic purposes, but should be interpreted cautiously.
 
-- **Binary threshold thinking**
+- **Binary threshold thinking:**
   Null model comparison is distributional, not purely threshold-based.
 
-- **Window-size sensitivity**
+- **Window-size sensitivity:**
   EWS trends can be sensitive to window size and overlap. Window-size sensitivity tests are provided and should be consulted before drawing conclusions.
 
-- **Assuming null models represent "no dynamics"**
+- **Assuming null models represent "no dynamics":**
   Null models preserve selected statistical properties (e.g. autocorrelation and power spectrum). They do not represent the absence of structure, only absence of spectral EWS.
 
-- **Expecting identical surrogate results across runs**
+- **Expecting identical surrogate results across runs:**
   Null model realizations are stochastic unless the RNG seed is fixed explicitly.
 
 ### References

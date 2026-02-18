@@ -48,13 +48,9 @@ variables = ews_sv.variables_weekly
 
 timeseries = ews_sv.variables_weekly
 
-names = []
-for variable in variables:
-    names.append(f'{variable.full_name} as {variable.name}')
+names = [f'{variable.full_name} as {variable.name}' for variable in variables]
 
-names_timeseries = []
-for ts in timeseries:
-    names_timeseries.append(f'{ts.full_name} as {ts.name}')
+names_timeseries = [f'{ts.full_name} as {ts.name}' for ts in timeseries]
 
 # Number of timesteps
 """
@@ -176,10 +172,9 @@ def signal_label(variable, signal):
         if signal not in ews_temporal_signals:
             raise ValueError(f"Unknown temporal ES '{signal}'")
         return ews_temporal_signals[signal]
-    else:
-        if signal not in ews_spatial_signals:
-            raise ValueError(f"Unknown spatial ES '{signal}'")
-        return ews_spatial_signals[signal]
+    if signal not in ews_spatial_signals:
+        raise ValueError(f"Unknown spatial ES '{signal}'")
+    return ews_spatial_signals[signal]
 
 
 # Helper function for consistent style for plots
@@ -531,11 +526,12 @@ def plot_maker(variables_input, signals, path='/1/', legend=False, save=False, s
         ax.set_prop_cycle(cycler(color=colours, linestyle=linestyles))
 
         # Dimension and x axis
-        dim = None
         if variable.spatial:
             dim = '.s.'
         elif variable.temporal:
             dim = '.t.'
+        else:
+            assert False, 'Variable should be spatial or temporal.'
 
         x_axis = ews_time_axis(variable, number_of_timesteps)
 
@@ -706,32 +702,20 @@ def user_input_plotmaker(path='./1/'):
         elif nr_of_variables < 9:
             print("Include another variable? [Y/n]")
             another_input = input()
-            if another_input == 'Y' or another_input == 'y':
-                cont = True
-            else:
-                cont = False
+            cont = another_input.lower() == 'y'
 
     print("Add a legend to the plot? [Y/n]")
     legend_input = input()
-    if legend_input == 'Y' or legend_input == 'y':
-        legend = True
-    else:
-        legend = False
+    legend = legend_input.lower() == 'y'
 
     print("Save the plot as a .pdf & .svg? [Y/n]")
     save_plot = input()
-    if save_plot == 'Y' or save_plot == 'y':
-        save = True
-    else:
-        save = False
+    save = save_plot.lower() == 'y'
 
     print("Show the plot when finished? [Y/n]")
     print("Note that the program is still running if the plot stays open.")
     show_plot = input()
-    if show_plot == 'Y' or show_plot == 'y':
-        show = True
-    else:
-        show = False
+    show = show_plot.lower() == 'y'
 
     plot_maker(variables_input=variables_list, signals=signals_list, path=path, legend=legend, save=save, show=show)
 

@@ -117,7 +117,7 @@ ews_supports_tau = {
 
 def extract_ews_data(X, ews_short_name):
     X = np.asarray(X)
-    assert X.ndim <= 2, (f"EWS '{ews_short_name}' returned unexpected array shape {X.shape}")
+    assert X.ndim <= 2, f"EWS '{ews_short_name}' returned unexpected array shape {X.shape}"
     if ews_short_name == 'coh':
         if X.ndim == 2:
             return X[0, :]  # coh returns (statistic, p-value) stacked along axis 0
@@ -556,14 +556,13 @@ view : A 3D numpy array containing evenly sized time windows (2D numpy arrays).
 
 def window(timeseries, window_size, window_overlap):
     actual_window_overlap = window_size - window_overlap
-    sh = (timeseries.size - window_size + 1, window_size)
+    sh = timeseries.size - window_size + 1, window_size
     st = timeseries.strides * 2
     if window_overlap != 0:
         view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::actual_window_overlap]
         return view.copy()
-    elif window_overlap == 0:
-        view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::window_size]
-        return view.copy()
+    view = np.lib.stride_tricks.as_strided(timeseries, strides=st, shape=sh)[::window_size]
+    return view.copy()
 
 
 # Windowsize tests
@@ -714,10 +713,7 @@ def test_windowgauss(state_variable, sum_stat, path='./1/'):
     for j, sigma in enumerate(gaussian_sigmas):
         print(f"Gaussian σ {sigma}/{gaussian_sigmas[-1]}")
 
-        if sigma > 0:
-            ts_detr = ts - ndimage.gaussian_filter1d(ts, sigma)
-        else:
-            ts_detr = ts.copy()
+        ts_detr = ts.copy() if sigma <= 0 else ts - ndimage.gaussian_filter1d(ts, sigma)
 
         for i, w in enumerate(window_sizes):
             windows = window(ts_detr, w, 0)
